@@ -17,6 +17,14 @@ const state = {
 
 // --- Formatters & Helpers ---
 
+function debounce(func, wait = 180) {
+  let timeout;
+  return function (...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  };
+}
+
 function formatMoney(cents, currency = '', forceInteger = false) {
   const absCents = Math.abs(parseInt(cents, 10) || 0);
   
@@ -1317,28 +1325,36 @@ function initApp() {
   const btnQuickNewTrx = document.getElementById('btn-quick-new-trx');
   if (btnQuickNewTrx) btnQuickNewTrx.addEventListener('click', () => openQuickTransactionModal());
 
-  // Global Search input handler
+  // Global Search input handler (debounced)
   const globalSearch = document.getElementById('global-search-input');
   if (globalSearch) {
-    globalSearch.addEventListener('input', (e) => {
-      const val = e.target.value.trim();
-      if (state.activeView !== 'customers' && state.activeView !== 'transactions') {
-        navigateTo('customers');
-      }
+    const debouncedGlobalSearch = debounce((val) => {
       if (state.activeView === 'customers') {
         document.getElementById('customers-search-input').value = val;
         loadCustomers(val);
       } else if (state.activeView === 'transactions') {
         loadTransactions();
       }
+    }, 180);
+
+    globalSearch.addEventListener('input', (e) => {
+      const val = e.target.value.trim();
+      if (state.activeView !== 'customers' && state.activeView !== 'transactions') {
+        navigateTo('customers');
+      }
+      debouncedGlobalSearch(val);
     });
   }
 
-  // Customers Search
+  // Customers Search (debounced)
   const custSearch = document.getElementById('customers-search-input');
   if (custSearch) {
+    const debouncedCustSearch = debounce((val) => {
+      loadCustomers(val);
+    }, 180);
+
     custSearch.addEventListener('input', (e) => {
-      loadCustomers(e.target.value.trim());
+      debouncedCustSearch(e.target.value.trim());
     });
   }
 

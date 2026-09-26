@@ -133,6 +133,17 @@ class DatabaseManager {
         name TEXT PRIMARY KEY,
         current_val INTEGER NOT NULL DEFAULT 0
       );
+
+      CREATE INDEX IF NOT EXISTS idx_customers_currency_archived ON customers(currency, is_archived);
+      CREATE INDEX IF NOT EXISTS idx_customers_account_code ON customers(account_code);
+      CREATE INDEX IF NOT EXISTS idx_transactions_customer ON transactions(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_date);
+      CREATE INDEX IF NOT EXISTS idx_transactions_customer_date ON transactions(customer_id, transaction_date);
+      CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(transaction_type);
+      CREATE INDEX IF NOT EXISTS idx_receipts_trx ON receipts(transaction_id);
+      CREATE INDEX IF NOT EXISTS idx_receipts_customer ON receipts(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_customer_notes_customer ON customer_notes(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
     `);
   }
 
@@ -331,8 +342,6 @@ class DatabaseManager {
     ]);
 
     const created = this.query("SELECT * FROM customers WHERE account_code = ?", [accountCode])[0];
-    this.saveToDisk();
-
     this.logAudit('CREATE', 'CUSTOMER', created.id, `Created customer Account ${accountCode} — ${created.name} (${created.currency})`, user);
     return created;
   }
@@ -369,7 +378,6 @@ class DatabaseManager {
       id
     ]);
 
-    this.saveToDisk();
     this.logAudit('UPDATE', 'CUSTOMER', id, `Updated customer Account ${existing[0].account_code} — ${data.name.trim()}`, user);
     return this.getCustomerById(id);
   }
@@ -382,7 +390,6 @@ class DatabaseManager {
     const newStatus = existing[0].is_archived === 1 ? 0 : 1;
     const actionDesc = newStatus === 1 ? 'archived' : 'restored';
     this.run("UPDATE customers SET is_archived = ?, updated_at = ? WHERE id = ?", [newStatus, new Date().toISOString(), id]);
-    this.saveToDisk();
 
     this.logAudit('ARCHIVE', 'CUSTOMER', id, `Admin ${actionDesc} Account ${existing[0].account_code} — ${existing[0].name}`, user);
     return { success: true, is_archived: newStatus };
@@ -401,7 +408,6 @@ class DatabaseManager {
     this.run("DELETE FROM customer_notes WHERE customer_id = ?", [id]);
     this.run("DELETE FROM customers WHERE id = ?", [id]);
     
-    this.saveToDisk();
     this.logAudit('DELETE', 'CUSTOMER', id, `Admin deleted Account ${existing[0].account_code} — ${existing[0].name}`, user);
     return { success: true };
   }
@@ -423,25 +429,57 @@ class DatabaseManager {
   }
 
   getCustomers(search = '', includeArchived = false) {
-    let sql = "SELECT * FROM customers WHERE 1=1";
+    let sql = `
+      SELECT 
+        c.*,
+        COALESCE(t.total_debit, 0) as total_debit_cents,
+        COALESCE(t.total_credit, 0) as total_credit_cents
+      FROM customers c
+      LEFT JOIN (
+        SELECT 
+          customer_id,
+          COALESCE(SUM(CASE WHEN transaction_type = 'Debit' THEN amount ELSE 0 END), 0) as total_debit,
+          COALESCE(SUM(CASE WHEN transaction_type = 'Credit' THEN amount ELSE 0 END), 0) as total_credit
+        FROM transactions
+        GROUP BY customer_id
+      ) t ON c.id = t.customer_id
+      WHERE 1=1
+    `;
     const params = [];
 
     if (!includeArchived) {
-      sql += " AND is_archived = 0";
+      sql += " AND c.is_archived = 0";
     }
 
     if (search && search.trim()) {
       const q = `%${search.trim()}%`;
-      sql += " AND (account_code LIKE ? OR name LIKE ? OR mobile LIKE ?)";
+      sql += " AND (c.account_code LIKE ? OR c.name LIKE ? OR c.mobile LIKE ?)";
       params.push(q, q, q);
     }
 
-    sql += " ORDER BY id ASC";
+    sql += " ORDER BY c.id ASC";
     const list = this.query(sql, params);
 
     return list.map(c => {
-      const balanceInfo = this.getCustomerBalance(c.id);
-      return { ...c, ...balanceInfo };
+      let initialBalance = 0;
+      if (c.opening_balance_type === 'Receivable') {
+        initialBalance = c.opening_balance;
+      } else if (c.opening_balance_type === 'Payable') {
+        initialBalance = -c.opening_balance;
+      }
+      const balanceCents = initialBalance + c.total_debit_cents - c.total_credit_cents;
+      let status = 'Zero Balance';
+      if (balanceCents > 0) status = 'Receivable';
+      else if (balanceCents < 0) status = 'Payable';
+
+      return {
+        ...c,
+        balance_cents: balanceCents,
+        status,
+        total_debit_cents: c.total_debit_cents,
+        total_credit_cents: c.total_credit_cents,
+        currency: c.currency
+      };
     });
   }
 
@@ -628,8 +666,6 @@ class DatabaseManager {
     // Generate a receipt for all transactions
     let receipt = this.createReceipt(created.id, cust[0].id, amountCents);
 
-    this.saveToDisk();
-
     this.logAudit(
       'CREATE', 
       'TRANSACTION', 
@@ -680,7 +716,6 @@ class DatabaseManager {
     } else {
       this.createReceipt(Number(id), trx.customer_id, amountCents);
     }
-    this.saveToDisk();
 
     this.logAudit(
       'UPDATE',
@@ -707,8 +742,6 @@ class DatabaseManager {
     // Delete associated receipt if any
     this.run("DELETE FROM receipts WHERE transaction_id = ?", [id]);
     this.run("DELETE FROM transactions WHERE id = ?", [id]);
-
-    this.saveToDisk();
 
     this.logAudit(
       'DELETE',
@@ -896,7 +929,6 @@ class DatabaseManager {
         ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?
       `, [key, String(val), String(val)]);
     }
-    this.saveToDisk();
     this.logAudit('UPDATE', 'SETTINGS', 0, 'Updated business settings profile', user);
     return this.getSettings();
   }
@@ -916,43 +948,71 @@ class DatabaseManager {
     `, [todayStr]);
     const todayTransactionsCount = todayTrxRes[0].count;
 
-    // AED Calculations
-    const aedCustomers = this.query("SELECT id FROM customers WHERE currency = 'AED' AND is_archived = 0");
+    // Fast Single-Query Balance Aggregation for All Active Customers
+    const customerBalances = this.query(`
+      SELECT 
+        c.currency,
+        c.opening_balance,
+        c.opening_balance_type,
+        COALESCE(t.total_debit, 0) as total_debit,
+        COALESCE(t.total_credit, 0) as total_credit
+      FROM customers c
+      LEFT JOIN (
+        SELECT 
+          customer_id,
+          COALESCE(SUM(CASE WHEN transaction_type = 'Debit' THEN amount ELSE 0 END), 0) as total_debit,
+          COALESCE(SUM(CASE WHEN transaction_type = 'Credit' THEN amount ELSE 0 END), 0) as total_credit
+        FROM transactions
+        GROUP BY customer_id
+      ) t ON c.id = t.customer_id
+      WHERE c.is_archived = 0
+    `);
+
     let aedReceivable = 0;
     let aedPayable = 0;
-    for (const c of aedCustomers) {
-      const b = this.getCustomerBalance(c.id);
-      if (b.balance_cents > 0) aedReceivable += b.balance_cents;
-      else if (b.balance_cents < 0) aedPayable += Math.abs(b.balance_cents);
-    }
-
-    const aedToday = this.query(`
-      SELECT 
-        COALESCE(SUM(CASE WHEN t.transaction_type = 'Credit' THEN t.amount ELSE 0 END), 0) as received,
-        COALESCE(SUM(CASE WHEN t.transaction_type = 'Debit' THEN t.amount ELSE 0 END), 0) as paid
-      FROM transactions t
-      JOIN customers c ON t.customer_id = c.id
-      WHERE c.currency = 'AED' AND t.transaction_date = ?
-    `, [todayStr]);
-
-    // PKR Calculations
-    const pkrCustomers = this.query("SELECT id FROM customers WHERE currency = 'PKR' AND is_archived = 0");
     let pkrReceivable = 0;
     let pkrPayable = 0;
-    for (const c of pkrCustomers) {
-      const b = this.getCustomerBalance(c.id);
-      if (b.balance_cents > 0) pkrReceivable += b.balance_cents;
-      else if (b.balance_cents < 0) pkrPayable += Math.abs(b.balance_cents);
+
+    for (const c of customerBalances) {
+      let initialBalance = 0;
+      if (c.opening_balance_type === 'Receivable') {
+        initialBalance = c.opening_balance;
+      } else if (c.opening_balance_type === 'Payable') {
+        initialBalance = -c.opening_balance;
+      }
+      const balanceCents = initialBalance + c.total_debit - c.total_credit;
+      if (c.currency === 'AED') {
+        if (balanceCents > 0) aedReceivable += balanceCents;
+        else if (balanceCents < 0) aedPayable += Math.abs(balanceCents);
+      } else if (c.currency === 'PKR') {
+        if (balanceCents > 0) pkrReceivable += balanceCents;
+        else if (balanceCents < 0) pkrPayable += Math.abs(balanceCents);
+      }
     }
 
-    const pkrToday = this.query(`
+    const todayTotals = this.query(`
       SELECT 
+        c.currency,
         COALESCE(SUM(CASE WHEN t.transaction_type = 'Credit' THEN t.amount ELSE 0 END), 0) as received,
         COALESCE(SUM(CASE WHEN t.transaction_type = 'Debit' THEN t.amount ELSE 0 END), 0) as paid
       FROM transactions t
       JOIN customers c ON t.customer_id = c.id
-      WHERE c.currency = 'PKR' AND t.transaction_date = ?
+      WHERE t.transaction_date = ?
+      GROUP BY c.currency
     `, [todayStr]);
+
+    let aedReceived = 0, aedPaid = 0;
+    let pkrReceived = 0, pkrPaid = 0;
+
+    for (const row of todayTotals) {
+      if (row.currency === 'AED') {
+        aedReceived = row.received;
+        aedPaid = row.paid;
+      } else if (row.currency === 'PKR') {
+        pkrReceived = row.received;
+        pkrPaid = row.paid;
+      }
+    }
 
     return {
       total_customers: totalCustomers,
@@ -960,14 +1020,14 @@ class DatabaseManager {
       aed_summary: {
         receivable_cents: aedReceivable,
         payable_cents: aedPayable,
-        today_received_cents: aedToday[0].received,
-        today_paid_cents: aedToday[0].paid
+        today_received_cents: aedReceived,
+        today_paid_cents: aedPaid
       },
       pkr_summary: {
         receivable_cents: pkrReceivable,
         payable_cents: pkrPayable,
-        today_received_cents: pkrToday[0].received,
-        today_paid_cents: pkrToday[0].paid
+        today_received_cents: pkrReceived,
+        today_paid_cents: pkrPaid
       }
     };
   }
@@ -975,26 +1035,51 @@ class DatabaseManager {
   // --- Reports ---
 
   getCustomerBalanceReport(currencyFilter = 'ALL', status = null) {
-    let sql = "SELECT * FROM customers WHERE is_archived = 0";
+    let sql = `
+      SELECT 
+        c.*,
+        COALESCE(t.total_debit, 0) as total_debit_cents,
+        COALESCE(t.total_credit, 0) as total_credit_cents
+      FROM customers c
+      LEFT JOIN (
+        SELECT 
+          customer_id,
+          COALESCE(SUM(CASE WHEN transaction_type = 'Debit' THEN amount ELSE 0 END), 0) as total_debit,
+          COALESCE(SUM(CASE WHEN transaction_type = 'Credit' THEN amount ELSE 0 END), 0) as total_credit
+        FROM transactions
+        GROUP BY customer_id
+      ) t ON c.id = t.customer_id
+      WHERE c.is_archived = 0
+    `;
     const params = [];
     if (currencyFilter === 'AED' || currencyFilter === 'PKR') {
-      sql += " AND currency = ?";
+      sql += " AND c.currency = ?";
       params.push(currencyFilter);
     }
-    sql += " ORDER BY id ASC";
+    sql += " ORDER BY c.id ASC";
 
     const customers = this.query(sql, params);
     const rows = customers.map(c => {
-      const bal = this.getCustomerBalance(c.id);
+      let initialBalance = 0;
+      if (c.opening_balance_type === 'Receivable') {
+        initialBalance = c.opening_balance;
+      } else if (c.opening_balance_type === 'Payable') {
+        initialBalance = -c.opening_balance;
+      }
+      const balanceCents = initialBalance + c.total_debit_cents - c.total_credit_cents;
+      let balStatus = 'Zero Balance';
+      if (balanceCents > 0) balStatus = 'Receivable';
+      else if (balanceCents < 0) balStatus = 'Payable';
+
       return {
         id: c.id,
         account_code: c.account_code,
         name: c.name,
         currency: c.currency,
-        total_debit: bal.total_debit_cents,
-        total_credit: bal.total_credit_cents,
-        current_balance: bal.balance_cents,
-        status: bal.status
+        total_debit: c.total_debit_cents,
+        total_credit: c.total_credit_cents,
+        current_balance: balanceCents,
+        status: balStatus
       };
     }).filter(row => !status || row.status === status);
 

@@ -24,7 +24,8 @@ async function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      spellcheck: false
     },
     backgroundColor: '#f8fafc',
     show: false
