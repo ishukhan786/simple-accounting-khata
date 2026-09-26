@@ -6,6 +6,7 @@ const GoogleDriveBackup = require('./src/db/google-drive');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
 const SessionGuard = require('./src/session-guard');
+const { autoUpdater } = require('electron-updater');
 let driveBackup;
 
 let mainWindow = null;
@@ -47,6 +48,33 @@ async function createWindow() {
   });
 }
 
+function checkForUpdates() {
+  // Only check for updates in packaged/production app
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = false;        // Sirf notify karo, download mat karo
+  autoUpdater.autoInstallOnAppQuit = false;
+
+  autoUpdater.on('update-available', (info) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('update-available', {
+        version: info.version,
+        releaseDate: info.releaseDate
+      });
+    }
+  });
+
+  autoUpdater.on('error', (err) => {
+    // Silently ignore update check errors (no internet, etc.)
+    console.log('Update check error (ignored):', err.message);
+  });
+
+  // App start ke 5 second baad check karo (window load hone do pehle)
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 5000);
+}
+
 function registerIpcHandlers() {
   const guard = new SessionGuard(db);
   const trustedUrl = pathToFileURL(path.join(__dirname, 'src', 'renderer', 'index.html')).href;
@@ -67,6 +95,7 @@ function registerIpcHandlers() {
     return driveBackup.configure(JSON.parse(fs.readFileSync(file, 'utf8')));
   });
   handle('openDriveSetup', async () => shell.openExternal('https://console.cloud.google.com/apis/library/drive.googleapis.com'));
+  handle('openReleasePage', async () => shell.openExternal('https://github.com/ishukhan786/simple-accounting-khata/releases/latest'));
   handle('connectDrive', async (e, user) => { requireAdmin(user); return driveBackup.connect(); });
   handle('switchDriveAccount', async (e, user) => { requireAdmin(user); return driveBackup.switchAccount(); });
   handle('disconnectDrive', async (e, user) => { requireAdmin(user); return driveBackup.disconnect(); });
@@ -151,6 +180,7 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers();
   await createWindow();
+  checkForUpdates();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

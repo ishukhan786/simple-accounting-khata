@@ -45,5 +45,7 @@ contextBridge.exposeInMainWorld('api', {
   getCustomerBalanceReport: (currency) => ipcRenderer.invoke('getCustomerBalanceReport', currency),
   getReceivableReport: (currency) => ipcRenderer.invoke('getReceivableReport', currency),
   getPayableReport: (currency) => ipcRenderer.invoke('getPayableReport', currency),
-  authenticate: (username, password) => ipcRenderer.invoke('authenticate', username, password)
+  authenticate: (username, password) => ipcRenderer.invoke('authenticate', username, password),
+  onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (_e, info) => callback(info)),
+  openReleasePage: () => ipcRenderer.invoke('openReleasePage')
 });

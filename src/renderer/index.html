@@ -9,6 +9,16 @@
 <body>
 
 <div id="app-container">
+
+  <!-- Update Notification Banner -->
+  <div id="update-banner" style="display:none; background:#2563eb; color:#fff; padding:10px 20px; font-size:0.9rem; display:none; align-items:center; justify-content:space-between; gap:12px; z-index:9999;">
+    <span id="update-banner-text">🚀 Naya version available hai!</span>
+    <div style="display:flex; gap:8px;">
+      <button onclick="window.api.openReleasePage()" style="background:#fff; color:#2563eb; border:none; padding:4px 14px; border-radius:6px; cursor:pointer; font-weight:600; font-size:0.85rem;">Download karo</button>
+      <button onclick="document.getElementById('update-banner').style.display='none'" style="background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.5); padding:4px 10px; border-radius:6px; cursor:pointer; font-size:0.85rem;">✕</button>
+    </div>
+  </div>
+
   <!-- Sidebar Navigation -->
   <aside id="sidebar">
     <div class="sidebar-header">

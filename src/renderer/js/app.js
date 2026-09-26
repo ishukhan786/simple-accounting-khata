@@ -1871,3 +1871,15 @@ function bindDriveBackupControls() {
   })));
   setInterval(() => { if (state.activeView === 'backup' && !driveUiBusy) loadDriveStatus(); }, 15000);
 }
+
+// --- Auto-Update Notification ---
+if (window.api && window.api.onUpdateAvailable) {
+  window.api.onUpdateAvailable((info) => {
+    const banner = document.getElementById('update-banner');
+    const text = document.getElementById('update-banner-text');
+    if (banner && text) {
+      text.textContent = 'Naya version v' + info.version + ' available hai! Abhi download karo.';
+      banner.style.display = 'flex';
+    }
+  });
+}
