@@ -1,6 +1,6 @@
 {
   "name": "simple-accounting-khata",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Offline Windows Desktop Accounting / Customer Khata Application",
   "main": "main.js",
   "scripts": {
@@ -49,7 +49,8 @@
         "nsis",
         "portable"
       ],
-      "icon": "src/renderer/assets/icon.png"
+      "icon": "src/renderer/assets/icon.png",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
