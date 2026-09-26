@@ -1,0 +1,33 @@
+{
+  "errors": [],
+  "clicks": [
+    {
+      "view": "dashboard",
+      "active": "view-dashboard",
+      "title": "Dashboard",
+      "navType": "function",
+      "toast": ""
+    },
+    {
+      "view": "customers",
+      "active": "view-customers",
+      "title": "Customers",
+      "navType": "function",
+      "toast": ""
+    },
+    {
+      "view": "transactions",
+      "active": "view-transactions",
+      "title": "All Transactions",
+      "navType": "function",
+      "toast": ""
+    },
+    {
+      "view": "reports",
+      "active": "view-reports",
+      "title": "Financial & Ledger Reports",
+      "navType": "function",
+      "toast": ""
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "name": "simple-accounting-khata",
+  "version": "1.0.2",
+  "description": "Offline Windows Desktop Accounting / Customer Khata Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:web": "node server.js",
+    "test:db": "node src/test_db.js",
+    "test:e2e": "node src/test_e2e.js",
+    "test:ui": "electron src/test_ui.js",
+    "test:navigation": "electron src/test_navigation.js",
+    "test:regressions": "node src/test_regressions.js",
+    "build:exe": "node stage-release.js && electron-builder --win",
+    "test:drive": "node --test src/test_drive.js",
+    "test:drive-ui": "electron src/test_drive_ui.js",
+    "test:security": "node --test src/test_security.js",
+    "test:desktop": "electron src/test_desktop.js"
+  },
+  "keywords": [
+    "accounting",
+    "khata",
+    "offline",
+    "windows",
+    "desktop",
+    "ledger",
+    "aed",
+    "pkr"
+  ],
+  "author": "Ishtiaq Uddin",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "sql.js": "^1.12.0"
+  },
+  "build": {
+    "appId": "com.simplekhata.desktop",
+    "productName": "Simple Khata",
+    "directories": {
+      "output": "dist",
+      "app": ".release/app"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "src/renderer/assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/db/**",
+      "src/session-guard.js",
+      "src/renderer/**",
+      "package.json",
+      "src/google-oauth.json"
+    ]
+  }
+}

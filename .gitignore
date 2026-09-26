@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.release/
+
+# App data
+data/
+backups/
+
+# Sensitive files
+src/google-oauth.json
+
+# Logs
+*.log
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Temp
+website-deploy.tar.gz
+
+website/

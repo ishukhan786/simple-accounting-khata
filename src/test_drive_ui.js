@@ -1,0 +1,56 @@
+const { app, BrowserWindow, ipcMain } = require('electron');
+const fs = require('fs'), path = require('path'), os = require('os'), assert = require('assert/strict');
+const DB = require('./db/database');
+const Backup = require('./db/backup');
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'khata-drive-ui-'));
+app.setPath('userData', path.join(dir, 'profile'));
+app.disableHardwareAcceleration();
+const timeout = setTimeout(() => app.exit(1), 30000);
+app.whenReady().then(async () => {
+  let db;
+  try {
+    db = new DB(path.join(dir, 'khata.db')); await db.init();
+    const backups = new Backup(db, path.join(dir, 'backups'));
+    const status = { configured: true, connected: false, pending: 0 };
+    let uploads = 0;
+    for (const name of ['getSettings','getDashboardData','getCustomers','getAllTransactions','getCustomerBalanceReport']) ipcMain.handle(name, (_, ...args) => name === 'getSettings' ? { ...db.getSettings(), require_login: '0' } : db[name](...args));
+    ipcMain.handle('getSession', () => db.getUsers()[0]);
+    ipcMain.handle('getBackupStatus', () => backups.getStatus());
+    ipcMain.handle('getBackups', () => []);
+    ipcMain.handle('getDriveStatus', () => status);
+    ipcMain.handle('importDriveCredentials', () => { status.configured = true; return status; });
+    ipcMain.handle('connectDrive', () => { status.connected = true; status.accountEmail = 'first@gmail.com'; return status; });
+    ipcMain.handle('switchDriveAccount', () => { status.accountEmail = 'second@gmail.com'; return status; });
+    ipcMain.handle('backupToDrive', () => { uploads++; status.lastSuccessAt = new Date().toISOString(); return status; });
+    ipcMain.handle('listDriveBackups', () => [{ id:'test-backup', name:'Khata_Backup_test.db', size:1024, createdTime:new Date().toISOString() }]);
+    const win = new BrowserWindow({ show:false, width:1280, height:820, webPreferences:{ preload:path.join(__dirname,'../preload.js'), contextIsolation:true, offscreen:true } });
+    await win.loadFile(path.join(__dirname,'renderer/index.html'));
+    const result = await win.webContents.executeJavaScript(`(async () => {
+      const tick = () => new Promise(r => setTimeout(r, 100));
+      const check = (value, msg) => { if (!value) throw Error(msg); };
+      const click = async id => { document.getElementById(id).click(); await tick(); };
+      navigateTo('backup'); await tick();
+      check(!document.getElementById('btn-drive-connect').disabled, 'Bundled setup should allow immediate Google sign-in');
+      check(!document.getElementById('drive-setup-guide').open, 'Advanced setup should stay collapsed');
+      await click('btn-drive-connect');
+      check(document.getElementById('btn-drive-connect').disabled, 'Duplicate connection should be disabled');
+      check(!document.getElementById('btn-drive-backup').disabled, 'Backup should enable after connection');
+      check(document.getElementById('drive-account-email').textContent === 'first@gmail.com', 'Connected Gmail missing');
+      await click('btn-drive-backup'); await click('btn-drive-list');
+      check(document.querySelector('.drive-backup-row strong').textContent === 'Khata_Backup_test.db', 'Cloud backup list missing');
+      await click('btn-drive-switch'); await click('btn-confirm-action-submit');
+      check(document.getElementById('drive-account-email').textContent === 'second@gmail.com', 'Changed Gmail missing');
+      check(document.getElementById('drive-backups-list').hidden, 'Previous account backup list remained visible');
+      state.currentUser = {role:'Staff'}; await loadDriveStatus();
+      check(document.getElementById('btn-drive-backup').disabled, 'Staff backup action must be disabled');
+      check(document.getElementById('btn-drive-switch').disabled, 'Staff account switch must be disabled');
+      state.currentUser = {role:'Admin'}; await loadDriveStatus();
+      return {passed:true, status:document.getElementById('drive-status-text').textContent};
+    })()`);
+    assert.equal(uploads,1);
+    fs.writeFileSync(path.join(__dirname,'drive-backup-preview.png'), (await win.webContents.capturePage()).toPNG());
+    console.log(JSON.stringify(result));
+    win.destroy(); db.db.close(); db=null;
+    clearTimeout(timeout); app.exit(0);
+  } catch(error) { console.error(error); clearTimeout(timeout); app.exit(1); }
+});
