@@ -1,5 +1,6 @@
 // All identities are resolved here, never from renderer/request user objects.
 const actorPositions = {
+  setPeriodLock: 2, commitImport: 1, installAppUpdate: 0,
   changePassword: 2, createCustomer: 1, updateCustomer: 2, archiveCustomer: 1,
   deleteCustomer: 1, createTransaction: 1, updateTransaction: 2, deleteTransaction: 1,
   addCustomerNote: 2, updateSettings: 1, createBackup: 0, restoreBackup: 1,
@@ -7,11 +8,15 @@ const actorPositions = {
   disconnectDrive: 0, backupToDrive: 0, listDriveBackups: 0, restoreDriveBackup: 1, switchDriveAccount: 0
 };
 const adminOnly = new Set([
+  'setPeriodLock', 'getBackupHealth', 'previewImport', 'commitImport', 'downloadAppUpdate', 'installAppUpdate',
   'updateCustomer', 'archiveCustomer', 'deleteCustomer', 'updateTransaction',
   'deleteTransaction', 'updateSettings', 'getUsers', 'createUser', 'deleteUser',
   'getAuditLogs', 'getBackups', 'createBackup', 'restoreBackup', 'pickRestoreFile',
   'pickBackupDirectory', 'getDriveStatus', 'importDriveCredentials', 'openDriveSetup',
   'connectDrive', 'disconnectDrive', 'backupToDrive', 'listDriveBackups', 'restoreDriveBackup', 'switchDriveAccount'
+]);
+const publicActions = new Set([
+  'checkAppUpdate', 'getAppVersion', 'openReleasePage', 'showNativeNotification'
 ]);
 class SessionGuard {
   constructor(db) { this.db = db; this.sessions = new Map(); this.locked = false; }
@@ -37,6 +42,7 @@ class SessionGuard {
     const actor = this.actor(key);
     if (name === 'getSession') return actor;
     if (name === 'getSettings' && !actor) return { require_login: '1', business_name: this.db.getSettings().business_name };
+    if (publicActions.has(name)) return callback(args, actor);
     if (!actor) throw new Error('Sign in to continue.');
     if (adminOnly.has(name) && actor.role !== 'Admin') throw new Error('Only an Administrator can perform this action.');
     const trustedArgs = [...args];

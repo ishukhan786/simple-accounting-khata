@@ -36,16 +36,16 @@ const Backup = require('./db/backup');
   check('Reverse date range rejected', () => assert.throws(() => db.getCustomerLedger(customer.id, 'ASC', '2026-02-01', '2026-01-01')));
   check('String receipt ID resolves balances', () => assert.equal(db.getReceiptByTransactionId(String(credit.id)).previous_balance_cents, 15000));
   check('Editing credit updates receipt amount and balance', () => {
-    db.updateTransaction(credit.id, { amount: 4000 }, admin);
+    db.updateTransaction(credit.id, { correction_reason: 'Regression correction', amount: 4000 }, admin);
     assert.equal(db.getReceiptByTransactionId(credit.id).amount, 4000);
     assert.equal(db.getReceiptByTransactionId(credit.id).remaining_balance_cents, 11000);
   });
   check('Changing credit to debit removes obsolete receipt', () => {
-    db.updateTransaction(credit.id, { amount: 4000, transaction_type: 'Debit' }, admin);
+    db.updateTransaction(credit.id, { correction_reason: 'Regression correction', amount: 4000, transaction_type: 'Debit' }, admin);
     assert.equal(db.getReceiptByTransactionId(credit.id), null);
   });
   check('Changing debit to credit creates receipt', () => {
-    db.updateTransaction(credit.id, { amount: 4000, transaction_type: 'Credit' }, admin);
+    db.updateTransaction(credit.id, { correction_reason: 'Regression correction', amount: 4000, transaction_type: 'Credit' }, admin);
     assert.equal(db.getReceiptByTransactionId(credit.id).amount, 4000);
   });
   for (const bad of [-1, 0, 1.5, '12oops', Infinity, Number.MAX_SAFE_INTEGER + 1]) {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell, Notification, net } = require('electron');
 const path = require('path');
 const DatabaseManager = require('./src/db/database');
 const BackupManager = require('./src/db/backup');
@@ -6,7 +6,12 @@ const GoogleDriveBackup = require('./src/db/google-drive');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
 const SessionGuard = require('./src/session-guard');
-const { autoUpdater } = require('electron-updater');
+const { createUpdateChecker } = require('./src/update-check');
+const checkGitHubRelease = createUpdateChecker({ fetch: (...args) => net.fetch(...args), getVersion: () => app.getVersion() });
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.simplekhata.desktop');
+}
 let driveBackup;
 
 let mainWindow = null;
@@ -20,7 +25,9 @@ async function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     title: 'Simple Khata - Offline Desktop Accounting',
-    icon: path.join(__dirname, 'src', 'renderer', 'assets', 'icon.png'),
+    icon: fs.existsSync(path.join(__dirname, 'src', 'renderer', 'assets', 'icon.ico'))
+      ? path.join(__dirname, 'src', 'renderer', 'assets', 'icon.ico')
+      : path.join(__dirname, 'src', 'renderer', 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -49,31 +56,46 @@ async function createWindow() {
   });
 }
 
-function checkForUpdates() {
-  // Only check for updates in packaged/production app
-  if (!app.isPackaged) return;
-
-  autoUpdater.autoDownload = false;        // Sirf notify karo, download mat karo
-  autoUpdater.autoInstallOnAppQuit = false;
-
-  autoUpdater.on('update-available', (info) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('update-available', {
-        version: info.version,
-        releaseDate: info.releaseDate
+function showNativeNotification(title, body, onClickUrl) {
+  try {
+    if (Notification.isSupported()) {
+      const iconPath = path.join(__dirname, 'src', 'renderer', 'assets', 'icon.png');
+      const notif = new Notification({
+        title: title || 'Simple Khata',
+        body: body || '',
+        icon: fs.existsSync(iconPath) ? iconPath : undefined
       });
+      if (onClickUrl) {
+        notif.on('click', () => {
+          shell.openExternal(onClickUrl);
+        });
+      }
+      notif.show();
     }
-  });
+  } catch (err) {
+    console.error('Desktop notification error:', err.message);
+  }
+}
 
-  autoUpdater.on('error', (err) => {
-    // Silently ignore update check errors (no internet, etc.)
-    console.log('Update check error (ignored):', err.message);
-  });
-
-  // App start ke 5 second baad check karo (window load hone do pehle)
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(() => {});
-  }, 5000);
+function startAutoUpdateCheck() {
+  // Check after 3 seconds so the window is ready
+  setTimeout(async () => {
+    try {
+      const info = await checkGitHubRelease();
+      if (info && info.isNewer) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('update-available', info);
+        }
+        showNativeNotification(
+          'Simple Khata - Naya Update Dastyab Hai! 🚀',
+          `Naya version v${info.latestVersion} release ho chuka hai. Download karne ke liye click karein.`,
+          info.releaseUrl
+        );
+      }
+    } catch (err) {
+      console.log('Background update check:', err.message);
+    }
+  }, 3000);
 }
 
 function registerIpcHandlers() {
@@ -85,6 +107,7 @@ function registerIpcHandlers() {
   });
   handle('getSession', () => {});
   handle('logout', () => {});
+  require('./src/desktop-improvements')({handle,db,backupManager,driveBackup,getWindow:()=>mainWindow,app,BrowserWindow,dialog,shell});
   const requireAdmin = user => { if (user?.role !== 'Admin') throw new Error('Only an Administrator can manage Google Drive backups.'); };
   handle('getDriveStatus', () => driveBackup.status());
   handle('importDriveCredentials', async (e, user) => {
@@ -155,6 +178,12 @@ function registerIpcHandlers() {
   handle('getReceivableReport', async (e, currency) => db.getReceivableReport(currency));
   handle('getPayableReport', async (e, currency) => db.getPayableReport(currency));
   handle('authenticate', async (e, username, password) => db.authenticate(username, password));
+  handle('checkAppUpdate', async () => checkGitHubRelease());
+  handle('getAppVersion', async () => app.getVersion());
+  handle('showNativeNotification', async (e, title, body, url) => {
+    showNativeNotification(title, body, url);
+    return true;
+  });
 }
 
 app.whenReady().then(async () => {
@@ -181,7 +210,7 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers();
   await createWindow();
-  checkForUpdates();
+  startAutoUpdateCheck();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

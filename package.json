@@ -1,6 +1,6 @@
 {
   "name": "simple-accounting-khata",
-  "version": "1.0.4",
+  "version": "1.1.1",
   "description": "Offline Windows Desktop Accounting / Customer Khata Application",
   "main": "main.js",
   "scripts": {
@@ -15,7 +15,9 @@
     "test:drive": "node --test src/test_drive.js",
     "test:drive-ui": "electron src/test_drive_ui.js",
     "test:security": "node --test src/test_security.js",
-    "test:desktop": "electron src/test_desktop.js"
+    "test:desktop": "electron src/test_desktop.js",
+    "test:improvements": "node --test src/test_improvements.js",
+    "test:updates": "node --test src/test_update.js"
   },
   "keywords": [
     "accounting",
@@ -35,6 +37,7 @@
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
+    "exceljs": "^4.4.0",
     "sql.js": "^1.12.0"
   },
   "build": {
@@ -49,14 +52,17 @@
         "nsis",
         "portable"
       ],
-      "icon": "src/renderer/assets/icon.png",
-      "signAndEditExecutable": false
+      "icon": "src/renderer/assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "installerIcon": "src/renderer/assets/icon.ico",
+      "uninstallerIcon": "src/renderer/assets/icon.ico",
+      "installerHeaderIcon": "src/renderer/assets/icon.ico",
+      "shortcutName": "Simple Khata"
     },
     "files": [
       "main.js",
@@ -65,12 +71,20 @@
       "src/session-guard.js",
       "src/renderer/**",
       "package.json",
-      "src/google-oauth.json"
+      "src/google-oauth.json",
+      "src/update-check.js",
+      "src/desktop-improvements.js",
+      "src/statement.js"
     ],
     "publish": {
       "provider": "github",
       "owner": "ishukhan786",
       "repo": "simple-accounting-khata"
+    }
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
     }
   }
 }

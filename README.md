@@ -108,7 +108,46 @@ npm run build:exe
 ```
 The output executable will be placed in the `dist/` directory.
 
-## Google Drive backup (Windows desktop)
+## New in 1.1.0
+
+- **Backup & Restore → Backup health** combines local backup time, verified Drive
+  upload, connected email, pending queue and actionable warnings. A local backup
+  does not count as a verified cloud upload.
+- Transactions accept an optional due date. Same-amount entries are allowed without confirmation. Submission IDs prevent
+  accidental double-click/retry saves of the same submission.
+- **Reports → Payment aging** uses FIFO credits against oldest debits and groups
+  outstanding receivables into Not due, 1–7, 8–30, 31–60, 61–90, 90+ and Undated.
+  Opening balances without dates stay Undated. AED and PKR are never combined.
+- Customer statements have date filters, direct PDF export and a WhatsApp draft.
+  Save and manually attach the PDF in WhatsApp; the app does not send messages.
+- **Backup & Restore → Import Excel / CSV** provides templates, validation,
+  duplicates, totals and a preview before committing. Use the first sheet of an
+  `.xlsx` or `.csv`, up to 1,000 rows / 5 MB; legacy `.xls` is unsupported. Amounts
+  are decimal currency units, dates ISO, and formulas must be pasted as plain
+  values. Import customers first, then use the generated app account codes for
+  transactions. Duplicate rows are skipped. Import is atomic and creates a backup.
+- **Settings → Security & Users → Day closing** locks all dates through a chosen
+  day. Admin reopening requires a reason and records an audit event. Locks also
+  prevent opening-balance changes and customer deletion. Restoring an older backup
+  restores that backup's period state, so review closing after a restore.
+- Edits require a correction reason and retain complete before/after snapshots,
+  user and timestamp. View history in Edit or **Settings → Audit Log**. Previous
+  versions' historical changes cannot be reconstructed retroactively.
+- **Settings → Download & install updates** shows progress, requires explicit
+  installation, and stops if the pre-install local backup fails. Installed Windows
+  copies support this; portable/development builds use the releases page.
+
+### Publishing Windows updates
+
+Publish a stable GitHub release tagged `v1.1.0` (then increment the version for
+future releases). Upload the matching `Simple Khata Setup 1.1.0.exe`, its
+`.exe.blockmap`, and `latest.yml` from the same build. The portable EXE is optional.
+Do not mark the release as a pre-release. In-app downloads require `latest.yml`;
+uploading only the EXE is sufficient only for manual downloads. Do not edit the
+hashes or filenames in generated metadata. This workspace build does not publish
+anything to GitHub automatically.
+
+## Connecting Google Drive
 
 Open **Backup & Restore → Google Drive backup → Connect Google Account**.
 The Windows app includes its Desktop OAuth client configuration. Choose your

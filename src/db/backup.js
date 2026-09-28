@@ -138,6 +138,7 @@ class BackupManager {
 
     try {
       this.dbManager.db = candidate;
+      this.dbManager.createTables();
       this.dbManager.saveToDisk();
 
       this.dbManager.logAudit(

@@ -594,6 +594,11 @@ async function openQuickTransactionModal(preselectedCustomerId = null) {
     document.getElementById('trx-credit').value = '';
     document.getElementById('trx-details').value = '';
     document.getElementById('trx-date').value = localToday();
+    state.transactionRequestId = crypto.randomUUID();
+    document.getElementById('trx-due-date').value = '';
+    document.getElementById('trx-correction-reason').value = '';
+    document.getElementById('trx-correction-reason').required = false;
+    document.getElementById('trx-correction-wrap').hidden = true;
 
     // Trigger customer change logic
     handleTrxCustomerSelectChange();
@@ -680,6 +685,9 @@ async function handleSaveTransaction() {
   try {
     const payload = {
       customer_id: customerId,
+      request_id: state.transactionRequestId,
+      due_date: document.getElementById('trx-due-date').value,
+      correction_reason: document.getElementById('trx-correction-reason').value,
       transaction_date: dateVal,
       transaction_type: currentSelectedTrxType,
       amount: amountCents,
@@ -803,10 +811,18 @@ function renderTransactionsTable(records) {
 
 // --- 6. Statement Modal & Printing ---
 
-async function openCustomerStatementModal(customerId) {
+async function openCustomerStatementModal(customerId, from = '', to = '') {
   try {
+    if (from && to && from > to) throw Error('From date must not be after To date.');
+    state.statementCustomerId = customerId;
+    state.statementFrom = from; state.statementTo = to;
+    const fromEl = document.getElementById('statement-from');
+    if (fromEl) fromEl.value = from;
+    const toEl = document.getElementById('statement-to');
+    if (toEl) toEl.value = to;
+
     const cust = await khataApi.getCustomerById(customerId);
-    const ledgerData = await khataApi.getCustomerLedger(customerId, 'ASC');
+    const ledgerData = await khataApi.getCustomerLedger(customerId, 'ASC', from || undefined, to || undefined);
     const settings = await khataApi.getSettings();
 
     // Populate Business Header
@@ -840,9 +856,28 @@ async function openCustomerStatementModal(customerId) {
     document.getElementById('stmt-currency').textContent = cur;
     document.getElementById('stmt-date-generated').textContent = `Generated: ${new Date().toLocaleDateString('en-GB')}`;
 
+    // Opening Balance Row
+    const openBal = ledgerData.summary.opening_balance || 0;
+    const openType = ledgerData.summary.opening_balance_type;
+    const isDr = openBal > 0 && openType === 'Receivable';
+    const isCr = openBal > 0 && openType === 'Payable';
+    const openDate = from ? formatDate(from) : (cust.created_at ? formatDate(cust.created_at.slice(0, 10)) : '—');
+    const openBalColor = isDr ? '#dc2626' : (isCr ? '#16a34a' : 'inherit');
+    const openBalTag = isDr ? 'Dr' : (isCr ? 'Cr' : '');
+
+    const openingRow = `
+      <tr style="background:#f8fafc; font-weight:600;">
+        <td>${openDate}</td>
+        <td>Opening Balance</td>
+        <td class="text-right tabular-nums">${isDr ? formatMoney(openBal, '', true) : '—'}</td>
+        <td class="text-right tabular-nums">${isCr ? formatMoney(openBal, '', true) : '—'}</td>
+        <td class="text-right tabular-nums" style="font-weight:700; color:${openBalColor};">${formatMoney(openBal, cur, true)} ${openBalTag}</td>
+      </tr>
+    `;
+
     // Table rows
     const tbody = document.getElementById('stmt-table-body');
-    tbody.innerHTML = ledgerData.transactions.map(t => `
+    const trxRows = ledgerData.transactions.map(t => `
       <tr>
         <td>${formatDate(t.transaction_date)}</td>
         <td>${escapeHtml(t.description || '—')}</td>
@@ -851,6 +886,8 @@ async function openCustomerStatementModal(customerId) {
         <td class="text-right tabular-nums" style="font-weight:700; color:${t.running_balance > 0 ? '#dc2626' : (t.running_balance < 0 ? '#16a34a' : 'inherit')};">${formatMoney(t.running_balance, cur, true)} ${t.running_balance > 0 ? 'Dr' : (t.running_balance < 0 ? 'Cr' : '')}</td>
       </tr>
     `).join('');
+
+    tbody.innerHTML = openingRow + trxRows;
 
     // Totals Box
     document.getElementById('stmt-calc-opening').textContent = formatMoney(ledgerData.summary.opening_balance, cur, true);
@@ -1146,6 +1183,13 @@ async function loadSettings() {
 
     loadUsersList();
     loadAuditLogs();
+
+    if (window.api && window.api.getAppVersion) {
+      window.api.getAppVersion().then(ver => {
+        const badge = document.getElementById('settings-app-version-badge');
+        if (badge && ver) badge.textContent = 'v' + ver;
+      }).catch(() => {});
+    }
   } catch (err) {
     showToast('Failed to load settings: ' + err.message, 'error');
   }
@@ -1706,6 +1750,10 @@ async function openEditTransactionModal(id) {
     document.getElementById('trx-credit').value = !isDebit ? (transaction.amount / 100).toFixed(2) : '';
     document.getElementById('trx-date').value = transaction.transaction_date || '';
     document.getElementById('trx-details').value = transaction.description || '';
+    document.getElementById('trx-due-date').value = transaction.due_date || '';
+    document.getElementById('trx-correction-reason').value = '';
+    document.getElementById('trx-correction-reason').required = true;
+    document.getElementById('trx-correction-wrap').hidden = false;
     handleTrxCustomerSelectChange();
     openModal('modal-new-transaction');
   } catch (err) { showToast('Could not open transaction: ' + err.message, 'error'); }
@@ -1888,14 +1936,103 @@ function bindDriveBackupControls() {
   setInterval(() => { if (state.activeView === 'backup' && !driveUiBusy) loadDriveStatus(); }, 15000);
 }
 
-// --- Auto-Update Notification ---
+// --- App Updates & Notification Handlers ---
+
+function showUpdateNotification(info) {
+  const ver = info.latestVersion || info.version || '';
+  const title = info.releaseName || `Simple Khata v${ver}`;
+  const notes = info.releaseNotes || 'Naye features aur security improvements shamil hain.';
+
+  // 1. Top floating banner
+  const banner = document.getElementById('update-banner');
+  const bannerText = document.getElementById('update-banner-text');
+  if (banner && bannerText) {
+    bannerText.textContent = `Naya version v${ver} dastyab hai! Abhi download karein.`;
+    banner.style.display = 'flex';
+  }
+
+  // 2. Center modal popup
+  const modalTitle = document.getElementById('modal-update-title');
+  const modalVer = document.getElementById('modal-update-version-tag');
+  const modalName = document.getElementById('modal-update-name');
+  const modalNotes = document.getElementById('modal-update-notes');
+  if (modalTitle) modalTitle.textContent = `Naya Update Dastyab Hai! (v${ver})`;
+  if (modalVer) modalVer.textContent = 'v' + ver;
+  if (modalName) modalName.textContent = title;
+  if (modalNotes) modalNotes.textContent = notes;
+  openModal('modal-update-available');
+}
+
+async function handleCheckForUpdates() {
+  const btn = document.getElementById('btn-check-updates');
+  const btnText = document.getElementById('btn-check-updates-text');
+  const statusText = document.getElementById('settings-update-status');
+  const downloadBtn = document.getElementById('btn-download-update');
+  if (!btn || !window.api?.checkAppUpdate) return;
+  if (btn.disabled) return;
+
+  const originalText = btnText ? btnText.textContent : 'Check for Updates';
+  if (btnText) btnText.textContent = 'Checking...';
+  btn.disabled = true;
+  if (statusText) statusText.textContent = 'GitHub se releases check ki ja rahi hain...';
+
+  try {
+    const info = await window.api.checkAppUpdate();
+    if (info.status === 'unavailable') {
+      if (statusText) { statusText.textContent = info.message; statusText.style.color = '#92400e'; }
+      if (downloadBtn) { downloadBtn.textContent = 'Open Releases Page'; downloadBtn.style.display = 'inline-flex'; }
+      return;
+    }
+    if (statusText) statusText.style.color = '';
+    if (downloadBtn) downloadBtn.textContent = 'Download Update';
+    const ver = info.latestVersion || info.version || info.currentVersion;
+    if (info.isNewer) {
+      if (statusText) {
+        statusText.innerHTML = `<span style="color:#16a34a; font-weight:700;">🚀 Naya version v${ver} dastyab hai!</span> <span style="font-size:0.8rem; color:#475569;">(${escapeHtml(info.releaseName || '')})</span>`;
+      }
+      if (downloadBtn) downloadBtn.style.display = 'inline-flex';
+      showToast(`Naya version v${ver} dastyab hai!`);
+      showUpdateNotification(info);
+    } else {
+      if (statusText) {
+        statusText.innerHTML = `<span style="color:#0284c7; font-weight:600;">✓ Aapka Simple Khata up-to-date hai (v${info.currentVersion}).</span>`;
+      }
+      if (downloadBtn) downloadBtn.style.display = 'none';
+      showToast(`Aap pehle se latest version (v${info.currentVersion}) use kar rahe hain.`);
+    }
+  } catch (err) {
+    const friendlyMsg = 'Update check complete nahin ho saka. Internet connection aur Admin login check karke dobara try karein.';
+    if (statusText) {
+      statusText.innerHTML = `<span style="color:#dc2626;">${escapeHtml(friendlyMsg)}</span>`;
+    }
+    showToast(friendlyMsg, 'error');
+  } finally {
+    if (btnText) btnText.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+async function handleTestNotification() {
+  showToast('Test update notification chal raha hai...');
+  if (window.api && window.api.showNativeNotification) {
+    await window.api.showNativeNotification(
+      'Simple Khata - Naya Update Dastyab Hai! 🚀',
+      'Version v1.1.1 dastyab hai. Download karne ke liye click karein.'
+    );
+  }
+  showUpdateNotification({
+    latestVersion: '1.1.1 (Test)',
+    releaseName: 'Simple Khata v1.1.1 - Test Update',
+    releaseNotes: '• Statement mein Opening Balance ki pehli entry\n• Clean original statement modal restore\n• Google Drive cloud backup & verified restore\n• GitHub release auto-update notification system'
+  });
+}
+
+document.getElementById('btn-check-updates')?.addEventListener('click', handleCheckForUpdates);
+document.getElementById('btn-test-notification')?.addEventListener('click', handleTestNotification);
+
+// --- Auto-Update Notification Banner & Dialog ---
 if (window.api && window.api.onUpdateAvailable) {
   window.api.onUpdateAvailable((info) => {
-    const banner = document.getElementById('update-banner');
-    const text = document.getElementById('update-banner-text');
-    if (banner && text) {
-      text.textContent = 'Naya version v' + info.version + ' available hai! Abhi download karo.';
-      banner.style.display = 'flex';
-    }
+    showUpdateNotification(info);
   });
 }

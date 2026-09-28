@@ -31,6 +31,10 @@ class DatabaseManager {
       this.db = new this.SQL.Database();
     }
 
+    if (fs.existsSync(this.dbPath) && this.query('PRAGMA table_info(transactions)').length && !this.query('PRAGMA table_info(transactions)').some(column => column.name === 'due_date')) {
+      const migrationBackup = this.dbPath + '.pre-1.1.0.db';
+      if (!fs.existsSync(migrationBackup)) fs.copyFileSync(this.dbPath, migrationBackup, fs.constants.COPYFILE_EXCL);
+    }
     this.createTables();
     this.seedDefaults();
     this.saveToDisk();
@@ -40,10 +44,15 @@ class DatabaseManager {
   saveToDisk() {
     if (!this.db) return;
     try {
-      const data = this.db.export();
+      const data = Buffer.from(this.db.export());
       const temporaryPath = this.dbPath + '.tmp';
-      fs.writeFileSync(temporaryPath, Buffer.from(data));
-      fs.renameSync(temporaryPath, this.dbPath);
+      fs.writeFileSync(temporaryPath, data);
+      try {
+        fs.renameSync(temporaryPath, this.dbPath);
+      } catch (renameErr) {
+        fs.copyFileSync(temporaryPath, this.dbPath);
+        try { fs.unlinkSync(temporaryPath); } catch (_) {}
+      }
     } catch (err) {
       console.error('Failed saving database to disk:', err);
       throw new Error('Could not persist data to disk.');
@@ -1185,4 +1194,5 @@ class DatabaseManager {
   }
 }
 
+require('./improvements')(DatabaseManager);
 module.exports = DatabaseManager;

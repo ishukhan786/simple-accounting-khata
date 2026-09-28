@@ -1,6 +1,19 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  getAgingReport: (date,currency) => ipcRenderer.invoke('getAgingReport',date,currency),
+  getPeriodLock: () => ipcRenderer.invoke('getPeriodLock'),
+  setPeriodLock: (date,reason) => ipcRenderer.invoke('setPeriodLock',date,reason),
+  getTransactionHistory: id => ipcRenderer.invoke('getTransactionHistory',id),
+  getBackupHealth: () => ipcRenderer.invoke('getBackupHealth'),
+  previewImport: kind => ipcRenderer.invoke('previewImport',kind),
+  commitImport: token => ipcRenderer.invoke('commitImport',token),
+  exportStatementPdf: (id,from,to) => ipcRenderer.invoke('exportStatementPdf',id,from,to),
+  openStatementWhatsApp: id => ipcRenderer.invoke('openStatementWhatsApp',id),
+  downloadAppUpdate: () => ipcRenderer.invoke('downloadAppUpdate'),
+  installAppUpdate: () => ipcRenderer.invoke('installAppUpdate'),
+  getUpdateProgress: () => ipcRenderer.invoke('getUpdateProgress'),
+  onUpdateProgress: callback => ipcRenderer.on('update-progress',(_,value)=>callback(value)),
   getSession: () => ipcRenderer.invoke('getSession'),
   logout: () => ipcRenderer.invoke('logout'),
   getDriveStatus: () => ipcRenderer.invoke('getDriveStatus'),
@@ -47,5 +60,8 @@ contextBridge.exposeInMainWorld('api', {
   getPayableReport: (currency) => ipcRenderer.invoke('getPayableReport', currency),
   authenticate: (username, password) => ipcRenderer.invoke('authenticate', username, password),
   onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (_e, info) => callback(info)),
-  openReleasePage: () => ipcRenderer.invoke('openReleasePage')
+  openReleasePage: () => ipcRenderer.invoke('openReleasePage'),
+  checkAppUpdate: () => ipcRenderer.invoke('checkAppUpdate'),
+  getAppVersion: () => ipcRenderer.invoke('getAppVersion'),
+  showNativeNotification: (title, body, url) => ipcRenderer.invoke('showNativeNotification', title, body, url)
 });
