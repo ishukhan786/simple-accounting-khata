@@ -72,7 +72,9 @@ test('import rollback restores in-memory and on-disk records on failure',async()
 test('customer statement is date-filtered, escaped and contains only the selected party',async()=>{
   const {db}=await fixture(),a=customer(db),b=db.createCustomer({name:'Secret Other Party',currency:'PKR'},admin);
   db.createTransaction(entry(a.id,{description:'<script>unsafe</script>'}),admin);db.createTransaction(entry(b.id,{description:'Other secret record'}),admin);
-  const result=statement(db,a.id,'2026-01-01','2026-01-31');assert.doesNotMatch(result.html,/Secret Other|Other secret/);assert.match(result.html,/&lt;script&gt;/);assert.match(result.html,/100.00/);
+  const result=statement(db,a.id,'2026-01-01','2026-01-31');assert.doesNotMatch(result.html,/Secret Other|Other secret/);assert.match(result.html,/&lt;script&gt;/);assert.match(result.html,/<td>100<\/td>/);
+  assert.match(result.html,/<td>100<\/td><td><\/td>/);
+  assert.match(result.html,/<td>Opening Balance<\/td><td><\/td><td><\/td>/);
   assert.throws(()=>statement(db,a.id,'2026-02-01','2026-01-01'),/From date/);
 });
 test('update download reports progress and installer cannot run without a successful backup',async()=>{
@@ -106,4 +108,34 @@ test('staff cannot import, unlock periods or install updates using forged Admin 
   for(const action of ['previewImport','commitImport','setPeriodLock','downloadAppUpdate','installAppUpdate']) {
     await assert.rejects(()=>guard.invoke(action,9,['',admin,admin],()=>{throw Error('Should not execute');}),/Administrator/);
   }
+});
+
+test('transaction numbers use independent yearly sequences and never reuse deleted numbers',async()=>{
+  const {db,dir}=await fixture(),c=customer(db);
+  const first=db.createTransaction(entry(c.id),admin).transaction;
+  const second=db.createTransaction(entry(c.id),admin).transaction;
+  assert.equal(first.transaction_code,'2026-0001');assert.equal(second.transaction_code,'2026-0002');
+  assert.equal(db.createTransaction(entry(c.id,{transaction_date:'2027-01-01'}),admin).transaction.transaction_code,'2027-0001');
+  db.deleteTransaction(second.id,admin);
+  const reopened=new DB(path.join(dir,'khata.db'));await reopened.init();
+  assert.equal(reopened.createTransaction(entry(c.id),admin).transaction.transaction_code,'2026-0003');
+  assert.equal(reopened.createTransaction(entry(c.id,{transaction_date:'2025-12-31'}),admin).transaction.transaction_code,'2025-0001');
+  reopened.run('DELETE FROM sequences WHERE name=?',['transaction_code_2026']);
+  assert.equal(reopened.createTransaction(entry(c.id),admin).transaction.transaction_code,'2026-0004');
+});
+
+test('Roznamcha filters transactions by specific day and isolates debit and credit totals',async()=>{
+  const {db}=await fixture(),a=customer(db),b=db.createCustomer({name:'PKR Customer',currency:'PKR'},admin);
+  db.createTransaction(entry(a.id,{transaction_date:'2026-03-15',amount:5000,transaction_type:'Debit'}),admin);
+  db.createTransaction(entry(a.id,{transaction_date:'2026-03-15',amount:3000,transaction_type:'Credit'}),admin);
+  db.createTransaction(entry(b.id,{transaction_date:'2026-03-15',amount:12000,transaction_type:'Credit'}),admin);
+  db.createTransaction(entry(a.id,{transaction_date:'2026-03-16',amount:9000,transaction_type:'Debit'}),admin);
+
+  const dayRows=db.getAllTransactions({date_from:'2026-03-15',date_to:'2026-03-15'});
+  assert.equal(dayRows.length,3);
+  const aedOnly=db.getAllTransactions({date_from:'2026-03-15',date_to:'2026-03-15',currency:'AED'});
+  assert.equal(aedOnly.length,2);
+  const pkrOnly=db.getAllTransactions({date_from:'2026-03-15',date_to:'2026-03-15',currency:'PKR'});
+  assert.equal(pkrOnly.length,1);
+  assert.equal(pkrOnly[0].amount,12000);
 });

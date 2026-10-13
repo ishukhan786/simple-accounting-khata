@@ -20,7 +20,7 @@ app.whenReady().then(async()=>{
     await openQuickTransactionModal(c.id);
     document.getElementById('trx-debit').value='123.45';document.getElementById('trx-details').value='Invoice for testing';document.getElementById('trx-date').value='2026-01-01';document.getElementById('trx-due-date').value='2026-01-08';
     await handleSaveTransaction();
-    let rows=await api.getAllTransactions();check(rows.length===1,'Transaction save');check(rows[0].due_date==='2026-01-08','Due date save');
+    let rows=await api.getAllTransactions();check(rows.length===1,'Transaction save');check(rows[0].transaction_code==='2026-0001','Yearly transaction code');check(rows[0].due_date==='2026-01-08','Due date save');
     await openQuickTransactionModal(c.id);
     document.getElementById('trx-debit').value='123.45';document.getElementById('trx-details').value='Invoice for testing';document.getElementById('trx-date').value='2026-01-01';
     await handleSaveTransaction();
@@ -28,6 +28,12 @@ app.whenReady().then(async()=>{
     check(!document.getElementById('trx-allow-duplicate'),'Duplicate confirmation checkbox should be removed');
     await openEditTransactionModal(rows[0].id);document.getElementById('trx-correction-reason').value='Invoice correction';document.getElementById('trx-debit').value='120.00';await handleSaveTransaction();
     await openEditTransactionModal(rows[0].id);await click('btn-trx-history');check(document.getElementById('trx-history').textContent.includes('Invoice correction'),'History UI');closeModal('modal-new-transaction',true);
+    await openQuickTransactionModal(c.id);
+    document.getElementById('trx-credit').value='10.00';document.getElementById('trx-details').value='Payment without automatic preview';
+    await handleSaveTransaction();await new Promise(r=>setTimeout(r,600));
+    check(!document.getElementById('modal-receipt').classList.contains('active-modal'),'Receipt must not open automatically after saving');
+    const payment=(await api.getAllTransactions()).find(t=>t.transaction_type==='Credit');check(payment,'Payment saved');
+    await showReceiptForTransaction(payment.id);check(document.getElementById('modal-receipt').classList.contains('active-modal'),'Manual receipt remains available');closeModal('modal-receipt',true);
     navigateTo('reports');document.getElementById('aging-date').value='2026-02-01';await click('generate-aging');check(document.getElementById('aging-result').textContent.includes('UI Test Customer'),'Aging result');
     await openCustomerStatementModal(c.id,'2026-01-01','2026-01-31');await click('save-statement-pdf');await click('share-statement');closeModal('modal-statement',true);
     navigateTo('backup');await click('refresh-health');check(document.getElementById('health-summary').textContent.includes('Google Drive is not connected'),'Health warning');

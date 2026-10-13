@@ -1,0 +1,34 @@
+const {app,BrowserWindow,dialog,shell}=require('electron');
+const fs=require('fs'),os=require('os'),path=require('path'),assert=require('node:assert/strict');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'khata-workflow-ui-'));app.setPath('userData',dir);app.disableHardwareAcceleration();
+const pdf=path.join(dir,'statement.pdf');dialog.showSaveDialog=async()=>({canceled:false,filePath:pdf});
+let whatsapp='';shell.openExternal=async url=>{whatsapp=url;};
+setTimeout(()=>app.exit(1),40000);require('../main');
+app.whenReady().then(async()=>{try{
+ let win;for(let i=0;i<100;i++){win=BrowserWindow.getAllWindows()[0];if(win&&!win.webContents.isLoading()&&await win.webContents.executeJavaScript("Boolean(document.getElementById('btn-save-next')&&state.currentUser)"))break;await new Promise(r=>setTimeout(r,100));}
+ win.webContents.on('console-message',(_,level,message)=>{if(level>=3)console.error(message);});
+ await win.webContents.executeJavaScript("window.addEventListener('unhandledrejection',e=>console.error(String(e.reason)))");
+ const js=s=>win.webContents.executeJavaScript(s),tick=()=>new Promise(r=>setTimeout(r,250));
+ const click=async selector=>{const point=await js(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...point});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point});await tick();};
+ await js(`(async()=>{const c=await api.createCustomer({name:'Workflow Customer',currency:'PKR',tag:'Party',mobile:'923001234567'});await api.createCustomer({name:'Cash Account',currency:'PKR',tag:'Cash'});await openCustomerKhata(c.id);await openQuickTransactionModal(c.id);document.getElementById('trx-date').value='2026-09-10';document.getElementById('trx-debit').value='125.50';document.getElementById('trx-details').value='First entry';})()`);
+ await click('#btn-save-next');
+ assert.equal(await js("document.getElementById('modal-new-transaction').classList.contains('active-modal')"),true);
+ assert.equal(await js('state.activeView'),'customer-khata');assert.match(await js("document.getElementById('khata-balance-val').textContent"),/125.50/);assert.equal(await js("document.getElementById('trx-date').value"),'2026-09-10');assert.equal(await js("document.getElementById('trx-debit').value"),'');
+ await js("document.getElementById('trx-credit').value='25.50';document.getElementById('trx-details').value='Second entry'");await click('#btn-save-transaction');
+ assert.equal(await js('(async()=> (await api.getAllTransactions()).length)()'),2);
+ await js("(async()=>{document.getElementById('customer-tag-filter').value='Party';await loadCustomers()})()");assert.equal(await js("document.querySelectorAll('#customers-table-body tr').length"),1);
+ await js("(async()=>{document.getElementById('customer-tag-filter').value='';document.getElementById('customer-sort').value='receivable';await loadCustomers()})()");assert.match(await js("document.querySelector('#customers-table-body tr').textContent"),/Workflow Customer/);
+ await js("(async()=>{navigateTo('reports');document.getElementById('monthly-month').value='2026-09';await loadMonthlySummary()})()");assert.match(await js("document.getElementById('monthly-results').textContent"),/125.5/);
+ await js("(async()=>{const t=(await api.getAllTransactions())[0];await api.deleteTransaction(t.id);navigateTo('backup');await loadDeletedEntries();})()");
+ assert.match(await js("document.getElementById('deleted-results').textContent"),/Restore/);
+ await js("(async()=>{const d=(await api.getDeletedTransactions())[0];await api.restoreDeletedTransaction(d.id,'UI check');await loadDeletedEntries();})()");assert.equal(await js('(async()=> (await api.getAllTransactions()).length)()'),2);
+ await js("(async()=>{const c=(await api.getCustomers()).find(c=>c.tag==='Party');await openCustomerStatementModal(c.id,'2026-09-01','2026-09-30');})()");
+ assert.equal(await js("getComputedStyle(document.getElementById('statement-extra-tools')).display"),'flex');
+ await js("document.getElementById('toast-container').replaceChildren()");await tick();
+ fs.writeFileSync(path.join(__dirname,'workflow-statement-preview.png'),(await win.webContents.capturePage()).toPNG());
+ await click('#share-statement');for(let i=0;i<40&&!whatsapp;i++)await tick();assert.match(whatsapp,/wa.me\/923001234567/);assert.match(decodeURIComponent(whatsapp),/2026-09-01 to 2026-09-30/);assert(fs.statSync(pdf).size>500);
+ await js("(async()=>{closeModal('modal-statement',true);navigateTo('dashboard')})()");assert.equal(await js("document.getElementById('dashboard-backup-status')"),null);
+ await js("navigateTo('customers')");await tick();fs.writeFileSync(path.join(__dirname,'workflow-customers-preview.png'),(await win.webContents.capturePage()).toPNG());
+ await js("navigateTo('reports');document.getElementById('monthly-month').scrollIntoView()");await tick();fs.writeFileSync(path.join(__dirname,'workflow-monthly-preview.png'),(await win.webContents.capturePage()).toPNG());
+ console.log('PASS: native Save & Next, tags, sorting, monthly summary, recovery, PDF + WhatsApp date range, dashboard without backup status');app.exit(0);
+}catch(e){console.error(e);app.exit(1);}});

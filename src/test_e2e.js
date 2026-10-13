@@ -207,7 +207,7 @@ async function runIsolated() {
     });
     await runE2ETests();
     const transaction = await post(baseUrl + '/api/get-transaction-by-id', { id: 1 });
-    if (transaction.data?.transaction_code !== 'TRX-000001') throw new Error('Transaction edit lookup failed');
+    if (transaction.data?.transaction_code !== '2026-0001' && transaction.data?.transaction_code !== 'TRX-000001') throw new Error('Transaction edit lookup failed');
     const filters = await post(baseUrl + '/api/get-all-transactions', { filters: { customer_id: 1, amount_min: 40000, amount_max: 60000, payment_method: 'Cash' } });
     if (filters.data?.length !== 1) throw new Error('Combined filters failed through API');
     const backupStatus = await post(baseUrl + '/api/backup-status', {});

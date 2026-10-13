@@ -37,6 +37,7 @@ class DatabaseManager {
     }
     this.createTables();
     this.seedDefaults();
+    this.repairMissingReceipts();
     this.saveToDisk();
     this.isInitialized = true;
   }
@@ -220,6 +221,22 @@ class DatabaseManager {
         this.run("INSERT INTO sequences (name, current_val) VALUES (?, ?)", [seq, maxVal]);
       }
     }
+  }
+
+  // Recreate receipts lost by older versions that deleted Debit receipts on edit.
+  repairMissingReceipts() {
+    const missing = this.query(`
+      SELECT t.id, t.customer_id, t.amount FROM transactions t
+      LEFT JOIN receipts r ON r.transaction_id = t.id
+      WHERE r.id IS NULL ORDER BY t.id ASC
+    `);
+    if (!missing.length) return 0;
+    const highest = this.query('SELECT receipt_number FROM receipts')
+      .map(row => /^REC-(\d+)$/.exec(row.receipt_number))
+      .reduce((max, match) => Math.max(max, match ? Number(match[1]) : 0), 0);
+    this.run('INSERT INTO sequences(name,current_val) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET current_val=MAX(current_val,excluded.current_val)', ['receipt_code', highest]);
+    for (const trx of missing) this.createReceipt(trx.id, trx.customer_id, trx.amount);
+    return missing.length;
   }
 
   // Helper run query that handles parameterized statements
@@ -624,9 +641,16 @@ class DatabaseManager {
 
   // --- Transactions ---
 
-  getNextTransactionCode() {
-    const num = this.getNextSequence('transaction_code');
-    return `TRX-${String(num).padStart(6, '0')}`;
+  getNextTransactionCode(date = this.localToday()) {
+    const year = this.validateDate(date).slice(0, 4);
+    const sequence = 'transaction_code_' + year;
+    // Recover the counter from restored/imported numbered rows; never reuse a issued number.
+    const issued = this.query('SELECT transaction_code FROM transactions WHERE transaction_code LIKE ?', [year + '-%'])
+      .map(row => /^\d{4}-\d{4,}$/.test(row.transaction_code) ? Number(row.transaction_code.slice(5)) : 0);
+    const highest = issued.reduce((max, value) => Math.max(max, value), 0);
+    this.run('INSERT INTO sequences(name,current_val) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET current_val=MAX(current_val,excluded.current_val)', [sequence, highest]);
+    const num = this.getNextSequence(sequence);
+    return year + '-' + String(num).padStart(4, '0');
   }
 
   createTransaction(data, user) {
@@ -647,7 +671,7 @@ class DatabaseManager {
 
     const now = new Date().toISOString();
     const trxDate = this.validateDate(data.transaction_date || this.localToday());
-    const trxCode = this.getNextTransactionCode();
+    const trxCode = this.getNextTransactionCode(trxDate);
 
     this.run(`
       INSERT INTO transactions (
@@ -712,15 +736,14 @@ class DatabaseManager {
       amountCents,
       (data.description || '').trim(),
       data.payment_method || trx.payment_method,
-      (data.reference_number || '').trim(),
-      (data.notes || '').trim(),
+      data.reference_number === undefined ? trx.reference_number : (data.reference_number || '').trim(),
+      data.notes === undefined ? trx.notes : (data.notes || '').trim(),
       now,
       id
     ]);
 
-    if (transactionType === 'Debit') {
-      this.run('DELETE FROM receipts WHERE transaction_id = ?', [id]);
-    } else if (this.query('SELECT id FROM receipts WHERE transaction_id = ?', [id]).length) {
+    // Every transaction (Debit voucher or Credit receipt) keeps its receipt record.
+    if (this.query('SELECT id FROM receipts WHERE transaction_id = ?', [id]).length) {
       this.run('UPDATE receipts SET amount = ? WHERE transaction_id = ?', [amountCents, id]);
     } else {
       this.createReceipt(Number(id), trx.customer_id, amountCents);
@@ -797,12 +820,14 @@ class DatabaseManager {
       params.push(filters.customer_id);
     }
     for (const [key, operator] of [['amount_min', '>='], ['amount_max', '<=']]) {
-      if (filters[key] !== undefined && filters[key] !== '') {
+      if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
         sql += ` AND t.amount ${operator} ?`;
         params.push(this.validateAmount(filters[key], true));
       }
     }
-    if (filters.amount_min !== undefined && filters.amount_max !== undefined && Number(filters.amount_min) > Number(filters.amount_max)) throw new Error('Minimum amount must not exceed maximum amount.');
+    const hasMin = filters.amount_min !== undefined && filters.amount_min !== null && filters.amount_min !== '';
+    const hasMax = filters.amount_max !== undefined && filters.amount_max !== null && filters.amount_max !== '';
+    if (hasMin && hasMax && Number(filters.amount_min) > Number(filters.amount_max)) throw new Error('Minimum amount must not exceed maximum amount.');
     if (filters.date_from) this.validateDate(filters.date_from);
     if (filters.date_to) this.validateDate(filters.date_to);
     if (filters.date_from && filters.date_to && filters.date_from > filters.date_to) throw new Error('Start date must not be after end date.');
@@ -817,13 +842,24 @@ class DatabaseManager {
       params.push(filters.date_to);
     }
 
-    sql += " ORDER BY t.transaction_date DESC, t.id DESC";
+    let pagination;
+    if(filters.page_size !== undefined){
+      const size=filters.page_size,page=filters.page ?? 1;
+      if(!Number.isInteger(size)||size<1||size>100||!Number.isSafeInteger(page)||page<1)throw Error('Invalid transaction page.');
+      const total=this.query(`SELECT COUNT(*) AS total FROM (${sql})`,params)[0].total;
+      const pages=Math.max(1,Math.ceil(total/size));
+      pagination={total,page:Math.min(page,pages),pageSize:size,pages};
+    }
+    sql += filters.sort === 'newest' ? " ORDER BY t.id DESC" : " ORDER BY t.transaction_date DESC, t.id DESC";
 
-    if (filters.limit) {
+    if(pagination){
+      sql+=' LIMIT ? OFFSET ?';params.push(pagination.pageSize,(pagination.page-1)*pagination.pageSize);
+    } else if (filters.limit) {
       sql += ` LIMIT ${parseInt(filters.limit, 10)}`;
     }
 
-    return this.query(sql, params);
+    const rows=this.query(sql, params);
+    return pagination?{...pagination,rows}:rows;
   }
 
   // --- Receipts ---
@@ -1084,6 +1120,8 @@ class DatabaseManager {
         id: c.id,
         account_code: c.account_code,
         name: c.name,
+        mobile: c.mobile || '',
+        address: c.address || '',
         currency: c.currency,
         total_debit: c.total_debit_cents,
         total_credit: c.total_credit_cents,
@@ -1195,4 +1233,5 @@ class DatabaseManager {
 }
 
 require('./improvements')(DatabaseManager);
+require('./workflow-features')(DatabaseManager);
 module.exports = DatabaseManager;

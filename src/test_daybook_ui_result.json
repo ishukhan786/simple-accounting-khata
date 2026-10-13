@@ -1,0 +1,6 @@
+{
+  "checks": [
+    "Currency selection, matching customers, native save clicks, standalone and linked totals, AED isolation"
+  ],
+  "errors": []
+}

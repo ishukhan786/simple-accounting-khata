@@ -76,6 +76,12 @@ async function startServer() {
           data = await guard.invoke(name, sessionKey, name === 'authenticate' ? [payload.username, payload.password] : [], async (_, user) => {
 
           switch (endpoint) {
+            case 'get-monthly-summary':
+              data = db.getMonthlySummary(payload.month); break;
+            case 'get-deleted-transactions':
+              data = db.getDeletedTransactions(); break;
+            case 'restore-deleted-transaction':
+              data = db.restoreDeletedTransaction(payload.id, payload.reason, user); break;
             case 'get-transaction-by-id':
               data = db.getTransactionById(payload.id);
               break;
@@ -141,6 +147,9 @@ async function startServer() {
               break;
             case 'get-backups':
               data = backupManager.getBackupList();
+              break;
+            case 'delete-backup':
+              data = backupManager.deleteBackup(payload.filename, user);
               break;
             case 'create-backup':
               data = backupManager.createBackup(null, user);

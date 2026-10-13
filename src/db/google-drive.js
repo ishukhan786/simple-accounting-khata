@@ -76,7 +76,13 @@ class GoogleDriveBackup {
     if (this.busy) throw new Error('A Google Drive operation is already running. Please wait.');
     this.busy = true;
     try { return await action(); }
-    catch (error) { this.lastError = error.message; throw error; }
+    catch (error) {
+      if (/fetch failed|network|timeout/i.test(error.message)) {
+        error = new Error('Could not reach Google Drive. Check your internet connection, VPN or firewall, then retry. Local backups and pending uploads are kept.', {cause:error});
+      }
+      this.lastError = error.message;
+      throw error;
+    }
     finally { this.busy = false; }
   }
 
@@ -164,7 +170,12 @@ class GoogleDriveBackup {
 
   async request(url, options = {}, retry = true) {
     const token = await this.access();
-    const response = await this.fetch(url, { ...options, headers: { ...options.headers, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(120000) });
+    let response;
+    try {
+      response = await this.fetch(url, { ...options, headers: { ...options.headers, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30000) });
+    } catch (error) {
+      throw new Error('Could not reach Google Drive. Check your internet connection, VPN or firewall, then retry. Local backups and pending uploads are kept.', {cause:error});
+    }
     if (response.status === 401 && retry) { this.accessToken = null; return this.request(url, options, false); }
     if (!response.ok) throw new Error(response.status === 403 ? 'Google Drive denied access. Check that Drive API is enabled and your account has storage available.' : `Google Drive request failed (${response.status}). It can be retried.`);
     return response;

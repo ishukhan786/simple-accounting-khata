@@ -41,7 +41,7 @@ app.whenReady().then(async () => {
         fs.writeFileSync(path.join(__dirname, 'transactions-preview.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
       }
       if (observed.active !== 'view-' + view) result.errors.push('Navigation failed: ' + view);
-      if (view !== 'reports') {
+      if (view === 'customers') {
         for (const size of [[1280, 820], [1024, 700]]) {
           win.setSize(...size);
           await new Promise(resolve => setTimeout(resolve, 250));

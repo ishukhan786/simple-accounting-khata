@@ -1,6 +1,6 @@
 {
   "name": "simple-accounting-khata",
-  "version": "1.1.1",
+  "version": "1.7.3",
   "description": "Offline Windows Desktop Accounting / Customer Khata Application",
   "main": "main.js",
   "scripts": {

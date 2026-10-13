@@ -80,7 +80,8 @@ module.exports = function extend(DB) {
       this.assertPeriodOpen(before.transaction_date); this.assertPeriodOpen(data.transaction_date || before.transaction_date);
       if (!String(data.correction_reason || '').trim()) throw Error('Enter a reason for this correction.');
       const due = data.due_date === undefined ? before.due_date : data.due_date;
-      if (due) { this.validateDate(due); if (due < (data.transaction_date || before.transaction_date)) throw Error('Due date cannot be before transaction date.'); }
+      // Preserve hidden legacy dates without blocking edits in the simplified form.
+      if (due && data.due_date !== undefined) { this.validateDate(due); if (due < (data.transaction_date || before.transaction_date)) throw Error('Due date cannot be before transaction date.'); }
       update.call(this, id, data, user);
       this.run('UPDATE transactions SET due_date=? WHERE id=?', [due || '', id]);
       const after = this.getTransactionById(id);

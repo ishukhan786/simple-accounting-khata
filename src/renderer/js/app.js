@@ -25,12 +25,11 @@ function debounce(func, wait = 180) {
   };
 }
 
-function formatMoney(cents, currency = '', forceInteger = false) {
+function formatMoney(cents, currency = '', integerDisplay = false) {
   const absCents = Math.abs(parseInt(cents, 10) || 0);
   
-  if (forceInteger) {
-    const intPart = Math.round(absCents / 100);
-    const formattedNum = intPart.toLocaleString('en-US');
+  if (integerDisplay) {
+    const formattedNum = Math.round(absCents / 100).toLocaleString('en-US');
     return currency ? `${currency} ${formattedNum}` : formattedNum;
   }
   
@@ -129,6 +128,7 @@ const khataApi = window.api || {
   getSettings: () => khataApi.call('get-settings'),
   updateSettings: (data, user) => khataApi.call('update-settings', { data, user }),
   getBackups: () => khataApi.call('get-backups'),
+  deleteBackup: filename => khataApi.call('delete-backup', { filename }),
   createBackup: (user) => khataApi.call('create-backup', { user }),
   restoreBackup: (filepath, user) => khataApi.call('restore-backup', { filepath, user }),
   pickRestoreFile: () => khataApi.call('pick-restore-file'),
@@ -253,7 +253,15 @@ let customerFilterArchived = false;
 
 async function loadCustomers(search = document.getElementById('customers-search-input').value.trim()) {
   try {
-    const list = await khataApi.getCustomers(search, customerFilterArchived);
+    let list = await khataApi.getCustomers(search, customerFilterArchived);
+    const tag = document.getElementById('customer-tag-filter')?.value;
+    if (tag) list = list.filter(c => c.tag === tag);
+    const currency = document.getElementById('customer-currency-filter')?.value;
+    if (currency) list = list.filter(c => c.currency === currency);
+    const sort = document.getElementById('customer-sort')?.value;
+    if (sort === 'name') list.sort((a,b) => a.name.localeCompare(b.name));
+    else if (sort === 'receivable') list.sort((a,b) => b.balance_cents - a.balance_cents);
+    else if (sort === 'payable') list.sort((a,b) => a.balance_cents - b.balance_cents);
     state.customers = list;
     renderCustomersTable(customerFilterArchived ? list.filter(c => c.is_archived === 1) : list);
   } catch (err) {
@@ -281,7 +289,7 @@ function renderCustomersTable(list) {
     return `
       <tr>
         <td><span class="account-code-pill">${c.account_code}</span></td>
-        <td>${listLine(c.name, true)}</td>
+        <td>${listLine(c.name, true)}<span class="badge badge-zero">${escapeHtml(c.tag || "Customer")}</span></td>
         <td>${listLine(c.mobile || '—')}${listLine(c.address || 'No address', false, true)}</td>
         <td>${listLine(formatMoney(c.balance_cents, c.currency), true)}<span class="balance-caption ${statusClass}" title="${balanceLabel(c.status)}">${shortBalanceLabel(c.status)}</span></td>
         <td class="text-center">
@@ -301,15 +309,19 @@ function renderCustomersTable(list) {
 // --- Customer Creation & Editing ---
 
 async function prepareNewCustomerModal() {
+  if (document.getElementById('customer-new-tag')) document.getElementById('customer-new-tag').value = 'Customer';
   try {
     const nextCode = await khataApi.peekNextAccountCode();
     document.getElementById('cust-new-account-code').value = `${nextCode} — Auto Generated`;
     document.getElementById('cust-new-name').value = '';
     document.getElementById('cust-new-mobile').value = '';
     document.getElementById('cust-new-address').value = '';
-    document.getElementById('curr-aed').checked = true;
-    document.getElementById('lbl-curr-aed').classList.add('active');
-    document.getElementById('lbl-curr-pkr').classList.remove('active');
+    const defaults = await khataApi.getSettings();
+    const usePkr = defaults.default_currency === 'PKR';
+    document.getElementById('curr-aed').checked = !usePkr;
+    document.getElementById('curr-pkr').checked = usePkr;
+    document.getElementById('lbl-curr-aed').classList.toggle('active', !usePkr);
+    document.getElementById('lbl-curr-pkr').classList.toggle('active', usePkr);
     document.getElementById('cust-new-opening-balance').value = '0.00';
     document.getElementById('cust-new-opening-type').value = 'Zero Balance';
     openModal('modal-new-customer');
@@ -335,6 +347,7 @@ async function handleSaveCustomer(openKhataImmediately = false) {
   state.savingCustomer = true;
   try {
     const created = await khataApi.createCustomer({
+      tag: document.getElementById('customer-new-tag')?.value || 'Customer',
       name,
       mobile,
       address,
@@ -365,6 +378,7 @@ async function openEditCustomerModal(customerId) {
     if (!cust) return;
 
     document.getElementById('edit-cust-id').value = cust.id;
+    document.getElementById('customer-edit-tag').value = cust.tag || 'Customer';
     document.getElementById('edit-cust-code').value = cust.account_code;
     document.getElementById('edit-cust-name').value = cust.name;
     document.getElementById('edit-cust-mobile').value = cust.mobile || '';
@@ -389,6 +403,7 @@ async function handleUpdateCustomer() {
 
   try {
     await khataApi.updateCustomer(id, {
+      tag: document.getElementById('customer-edit-tag')?.value || 'Customer',
       name,
       mobile,
       address,
@@ -450,7 +465,7 @@ function handleDeleteCustomer(customerId) {
 
 // --- 3. Customer Khata Ledger View Logic ---
 
-async function openCustomerKhata(customerId) {
+async function openCustomerKhata(customerId, refreshOnly = false) {
   try {
     const cust = await khataApi.getCustomerById(customerId);
     if (!cust) throw new Error('Customer not found');
@@ -490,8 +505,8 @@ async function openCustomerKhata(customerId) {
     statusBadge.textContent = balanceLabel(cust.status);
     statusBadge.className = 'badge ' + (cust.status === 'Receivable' ? 'badge-receivable' : (cust.status === 'Payable' ? 'badge-payable' : 'badge-zero'));
 
-    navigateTo('customer-khata');
-    loadKhataLedger();
+    if (!refreshOnly) navigateTo('customer-khata');
+    await loadKhataLedger();
   } catch (err) {
     showToast('Failed to open Khata: ' + err.message, 'error');
   }
@@ -533,10 +548,10 @@ async function loadKhataLedger() {
             ${t.reference_number ? `<span style="font-size:0.75rem; color:#64748b;">Ref: ${escapeHtml(t.reference_number)}</span>` : ''}
           </td>
           <td class="text-right tabular-nums" style="color:#b91c1c; font-weight:600;">
-            ${t.debit > 0 ? formatMoney(t.debit, cur) : '—'}
+            ${t.debit > 0 ? formatMoney(t.debit, cur) : ''}
           </td>
           <td class="text-right tabular-nums" style="color:#15803d; font-weight:600;">
-            ${t.credit > 0 ? formatMoney(t.credit, cur) : '—'}
+            ${t.credit > 0 ? formatMoney(t.credit, cur) : ''}
           </td>
           <td class="text-right tabular-nums" style="font-weight:700;">
             ${runningFormatted} <small style="color:#64748b; font-weight:600;">${runningStatusBadge}</small>
@@ -545,9 +560,9 @@ async function loadKhataLedger() {
             <div style="display:inline-flex; gap:4px;">
               <button class="btn btn-outline btn-sm" onclick="showReceiptForTransaction(${t.id})" title="Print Receipt">Receipt</button>
               ${state.currentUser?.role === 'Admin' ? `<button class="btn btn-outline btn-sm" onclick="openEditTransactionModal(${t.id})">Edit</button>` : ''}
-              <button class="btn btn-icon btn-sm" onclick="handleDeleteTransaction(${t.id})" title="Delete Transaction">
+              ${state.currentUser?.role === 'Admin' ? `<button class="btn btn-icon btn-sm" onclick="handleDeleteTransaction(${t.id})" title="Delete Transaction">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-              </button>
+              </button>` : ''}
             </div>
           </td>
         </tr>
@@ -566,6 +581,7 @@ async function openQuickTransactionModal(preselectedCustomerId = null) {
     state.editingTransactionId = null;
     document.getElementById('transaction-modal-title').textContent = 'New Transaction Entry';
     document.getElementById('btn-save-transaction').textContent = 'Save Transaction (Ctrl+S)';
+    if (document.getElementById('btn-save-next')) document.getElementById('btn-save-next').hidden = false;
     const lockedCustomerId = preselectedCustomerId ?? (state.activeView === 'customer-khata' ? state.currentCustomer?.id : null);
     state.transactionCustomerId = null;
     let customers;
@@ -594,11 +610,16 @@ async function openQuickTransactionModal(preselectedCustomerId = null) {
     document.getElementById('trx-credit').value = '';
     document.getElementById('trx-details').value = '';
     document.getElementById('trx-date').value = localToday();
+    const dueDateInput = document.getElementById('trx-due-date');
+    if (dueDateInput) dueDateInput.value = '';
     state.transactionRequestId = crypto.randomUUID();
-    document.getElementById('trx-due-date').value = '';
-    document.getElementById('trx-correction-reason').value = '';
-    document.getElementById('trx-correction-reason').required = false;
-    document.getElementById('trx-correction-wrap').hidden = true;
+    const corrReasonEl = document.getElementById('trx-correction-reason');
+    if (corrReasonEl) {
+      corrReasonEl.value = '';
+      corrReasonEl.required = false;
+    }
+    const corrWrapEl = document.getElementById('trx-correction-wrap');
+    if (corrWrapEl) corrWrapEl.hidden = true;
 
     // Trigger customer change logic
     handleTrxCustomerSelectChange();
@@ -644,7 +665,7 @@ function handleTrxCustomerSelectChange() {
   }
 }
 
-async function handleSaveTransaction() {
+async function handleSaveTransaction(saveNext = false) {
   if (state.savingTransaction || !document.getElementById('form-new-transaction').reportValidity()) return;
   const custSelect = document.getElementById('trx-customer-select');
   const customerId = state.transactionCustomerId ?? custSelect.value;
@@ -657,11 +678,11 @@ async function handleSaveTransaction() {
   const creditCents = parseAmountToCents(document.getElementById('trx-credit').value);
 
   if (debitCents === 0 && creditCents === 0) {
-    showToast('Please enter either Debit or Credit amount.', 'error');
+    showToast('Please enter either Debit (Banam) or Credit (Jama) amount.', 'error');
     return;
   }
   if (debitCents > 0 && creditCents > 0) {
-    showToast('Please enter either Debit OR Credit, not both in a single entry.', 'error');
+    showToast('Please enter either Debit (Banam) OR Credit (Jama), not both in a single entry.', 'error');
     return;
   }
 
@@ -681,28 +702,36 @@ async function handleSaveTransaction() {
   }
 
   state.savingTransaction = true;
-  const savedType = currentSelectedTrxType;
   try {
+    const editingId = state.editingTransactionId;
+    const dueDateInput = document.getElementById('trx-due-date');
+    const dueDateVal = dueDateInput?.value ? dueDateInput.value : (editingId ? undefined : '');
     const payload = {
       customer_id: customerId,
       request_id: state.transactionRequestId,
-      due_date: document.getElementById('trx-due-date').value,
-      correction_reason: document.getElementById('trx-correction-reason').value,
+      correction_reason: document.getElementById('trx-correction-reason')?.value || '',
+      due_date: dueDateVal,
       transaction_date: dateVal,
       transaction_type: currentSelectedTrxType,
       amount: amountCents,
-      description: details,
-      payment_method: 'Cash',
-      reference_number: '',
-      notes: ''
+      description: details
     };
-    const editingId = state.editingTransactionId;
     const res = editingId
       ? { transaction: await khataApi.updateTransaction(editingId, payload, state.currentUser) }
       : await khataApi.createTransaction(payload, state.currentUser);
 
     showToast(`Transaction ${res.transaction.transaction_code} ${editingId ? 'updated' : 'recorded'} successfully!`);
-    closeModal('modal-new-transaction', true);
+    if (saveNext && !editingId) {
+      document.getElementById('trx-debit').value = '';
+      document.getElementById('trx-credit').value = '';
+      document.getElementById('trx-details').value = '';
+      state.transactionRequestId = crypto.randomUUID();
+      const customer = await khataApi.getCustomerById(customerId);
+      const option = document.getElementById('trx-customer-select').selectedOptions[0];
+      option.dataset.balance = customer.balance_cents; option.dataset.status = customer.status;
+      handleTrxCustomerSelectChange(); rememberForm('modal-new-transaction');
+      document.getElementById('trx-details').focus();
+    } else closeModal('modal-new-transaction', true);
     state.savingTransaction = false;
 
     // Refresh active views
@@ -710,15 +739,9 @@ async function handleSaveTransaction() {
     else if (state.activeView === 'customers') loadCustomers();
     else if (state.activeView === 'transactions') loadTransactions();
     else if (state.activeView === 'customer-khata' && state.currentCustomer && state.currentCustomer.id == customerId) {
-      openCustomerKhata(customerId);
+      await openCustomerKhata(customerId, saveNext && !editingId);
     }
 
-    // If Credit, ask user if they want to view/print receipt
-    if (savedType === 'Credit' && res.receipt) {
-      setTimeout(() => {
-        showReceiptForTransaction(res.transaction.id);
-      }, 300);
-    }
   } catch (err) {
     showToast('Failed to record transaction: ' + err.message, 'error');
   } finally {
@@ -755,7 +778,8 @@ function handleDeleteTransaction(trxId) {
 
 // --- 5. All Transactions View Logic ---
 
-async function loadTransactions() {
+async function loadTransactions(page = 1) {
+  const request=state.transactionsRequest=(state.transactionsRequest||0)+1;
   const currency = document.getElementById('filter-trx-currency').value;
   const type = document.getElementById('filter-trx-type').value;
   const dateFrom = document.getElementById('filter-trx-date-from').value;
@@ -767,6 +791,8 @@ async function loadTransactions() {
     const maxInput = document.getElementById('filter-trx-max');
     if (!minInput.reportValidity() || !maxInput.reportValidity()) return;
     const list = await khataApi.getAllTransactions({
+      page_size:50,page,
+      sort: 'newest',
       customer_id: document.getElementById('filter-trx-customer').value,
       payment_method: document.getElementById('filter-trx-payment').value,
       amount_min: minInput.value === '' ? undefined : parseAmountToCents(minInput.value),
@@ -778,8 +804,16 @@ async function loadTransactions() {
       search
     });
 
-    renderTransactionsTable(list);
+    if(request!==state.transactionsRequest)return;
+    renderTransactionsTable(list.rows);
+    state.transactionsPage=list.page;
+    document.getElementById('transactions-page-info').textContent=`${list.total?((list.page-1)*list.pageSize+1):0}–${Math.min(list.page*list.pageSize,list.total)} of ${list.total} transactions · Page ${list.page} of ${list.pages}`;
+    document.getElementById('transactions-prev').disabled=list.page<=1;
+    document.getElementById('transactions-next').disabled=list.page>=list.pages;
   } catch (err) {
+    if(request!==state.transactionsRequest)return;
+    document.getElementById('transactions-prev').disabled=true;
+    document.getElementById('transactions-next').disabled=true;
     showToast('Failed to load transactions: ' + err.message, 'error');
     document.getElementById('all-transactions-body').innerHTML = '';
     document.getElementById('transaction-filter-summary').textContent = err.message;
@@ -801,10 +835,10 @@ function renderTransactionsTable(records) {
     <td class="text-right">${listLine(t.transaction_type === 'Debit' ? formatMoney(t.amount, t.currency) : '—', true)}</td>
     <td class="text-right">${listLine(t.transaction_type === 'Credit' ? formatMoney(t.amount, t.currency) : '—', true)}</td>
     <td><div class="list-actions transaction-actions">
-      <button class="btn btn-outline btn-sm" onclick="openCustomerKhata(${t.customer_id})">Khata</button>
-      ${state.currentUser?.role === 'Admin' ? `<button class="btn btn-outline btn-sm" onclick="openEditTransactionModal(${t.id})">Edit</button>` : ''}
-      <button class="btn btn-outline btn-sm" onclick="showReceiptForTransaction(${t.id})">Receipt</button>
-      ${state.currentUser?.role === 'Admin' ? `<button class="btn btn-outline btn-sm" onclick="handleDeleteTransaction(${t.id})">Delete</button>` : ''}
+      <button class="btn btn-outline btn-sm action-khata" onclick="openCustomerKhata(${t.customer_id})">Khata</button>
+      ${state.currentUser?.role === 'Admin' ? `<button class="btn btn-outline btn-sm action-edit" onclick="openEditTransactionModal(${t.id})">Edit</button>` : ''}
+      <button class="btn btn-outline btn-sm action-receipt" onclick="showReceiptForTransaction(${t.id})">Receipt</button>
+      ${state.currentUser?.role === 'Admin' ? `<button class="btn btn-outline btn-sm action-delete" onclick="handleDeleteTransaction(${t.id})">Delete</button>` : ''}
     </div></td>
   </tr>`).join('') || '<tr><td colspan="6" class="text-center">No transactions match these filters.</td></tr>';
 }
@@ -812,18 +846,15 @@ function renderTransactionsTable(records) {
 // --- 6. Statement Modal & Printing ---
 
 async function openCustomerStatementModal(customerId, from = '', to = '') {
+  const request = (state.statementRequest || 0) + 1;
+  state.statementRequest = request;
+  state.statementLoading = true;
   try {
     if (from && to && from > to) throw Error('From date must not be after To date.');
-    state.statementCustomerId = customerId;
-    state.statementFrom = from; state.statementTo = to;
-    const fromEl = document.getElementById('statement-from');
-    if (fromEl) fromEl.value = from;
-    const toEl = document.getElementById('statement-to');
-    if (toEl) toEl.value = to;
-
     const cust = await khataApi.getCustomerById(customerId);
     const ledgerData = await khataApi.getCustomerLedger(customerId, 'ASC', from || undefined, to || undefined);
     const settings = await khataApi.getSettings();
+    if (request !== state.statementRequest) return;
 
     // Populate Business Header
     document.getElementById('stmt-biz-name').textContent = settings.business_name || 'Simple Khata Store';
@@ -838,7 +869,7 @@ async function openCustomerStatementModal(customerId, from = '', to = '') {
 
     const mobWrap = document.getElementById('stmt-cust-mobile-wrap');
     if (cust.mobile) {
-      mobWrap.style.display = 'block';
+      mobWrap.style.display = 'grid';
       document.getElementById('stmt-cust-mobile').textContent = cust.mobile;
     } else {
       mobWrap.style.display = 'none';
@@ -846,7 +877,7 @@ async function openCustomerStatementModal(customerId, from = '', to = '') {
 
     const addrWrap = document.getElementById('stmt-cust-addr-wrap');
     if (cust.address) {
-      addrWrap.style.display = 'block';
+      addrWrap.style.display = 'grid';
       document.getElementById('stmt-cust-addr').textContent = cust.address;
     } else {
       addrWrap.style.display = 'none';
@@ -869,9 +900,9 @@ async function openCustomerStatementModal(customerId, from = '', to = '') {
       <tr style="background:#f8fafc; font-weight:600;">
         <td>${openDate}</td>
         <td>Opening Balance</td>
-        <td class="text-right tabular-nums">${isDr ? formatMoney(openBal, '', true) : '—'}</td>
-        <td class="text-right tabular-nums">${isCr ? formatMoney(openBal, '', true) : '—'}</td>
-        <td class="text-right tabular-nums" style="font-weight:700; color:${openBalColor};">${formatMoney(openBal, cur, true)} ${openBalTag}</td>
+        <td class="text-right tabular-nums">${isDr ? formatMoney(openBal, '') : ''}</td>
+        <td class="text-right tabular-nums">${isCr ? formatMoney(openBal, '') : ''}</td>
+        <td class="text-right tabular-nums" style="font-weight:700; color:${openBalColor};">${formatMoney(openBal, cur)} ${openBalTag}</td>
       </tr>
     `;
 
@@ -881,23 +912,36 @@ async function openCustomerStatementModal(customerId, from = '', to = '') {
       <tr>
         <td>${formatDate(t.transaction_date)}</td>
         <td>${escapeHtml(t.description || '—')}</td>
-        <td class="text-right tabular-nums">${t.debit > 0 ? formatMoney(t.debit, '', true) : '—'}</td>
-        <td class="text-right tabular-nums">${t.credit > 0 ? formatMoney(t.credit, '', true) : '—'}</td>
-        <td class="text-right tabular-nums" style="font-weight:700; color:${t.running_balance > 0 ? '#dc2626' : (t.running_balance < 0 ? '#16a34a' : 'inherit')};">${formatMoney(t.running_balance, cur, true)} ${t.running_balance > 0 ? 'Dr' : (t.running_balance < 0 ? 'Cr' : '')}</td>
+        <td class="text-right tabular-nums">${t.debit > 0 ? formatMoney(t.debit, '') : ''}</td>
+        <td class="text-right tabular-nums">${t.credit > 0 ? formatMoney(t.credit, '') : ''}</td>
+        <td class="text-right tabular-nums" style="font-weight:700; color:${t.running_balance > 0 ? '#dc2626' : (t.running_balance < 0 ? '#16a34a' : 'inherit')};">${formatMoney(t.running_balance, cur)} ${t.running_balance > 0 ? 'Dr' : (t.running_balance < 0 ? 'Cr' : '')}</td>
       </tr>
     `).join('');
 
     tbody.innerHTML = openingRow + trxRows;
 
     // Totals Box
-    document.getElementById('stmt-calc-opening').textContent = formatMoney(ledgerData.summary.opening_balance, cur, true);
-    document.getElementById('stmt-calc-debit').textContent = formatMoney(ledgerData.summary.total_debit, cur, true);
-    document.getElementById('stmt-calc-credit').textContent = formatMoney(ledgerData.summary.total_credit, cur, true);
-    document.getElementById('stmt-calc-closing').textContent = formatMoney(ledgerData.summary.closing_balance, cur, true);
+    document.getElementById('stmt-calc-opening').textContent = `${formatMoney(openBal, cur)} ${openBalTag}`.trim();
+    document.getElementById('stmt-calc-debit').textContent = formatMoney(ledgerData.summary.total_debit, cur);
+    document.getElementById('stmt-calc-credit').textContent = formatMoney(ledgerData.summary.total_credit, cur);
+    const closingBal = ledgerData.summary.closing_balance;
+    const closingCard = document.getElementById('stmt-calc-closing').closest('.stmt-card');
+    closingCard.classList.toggle('stmt-debit', closingBal > 0);
+    closingCard.classList.toggle('stmt-credit', closingBal < 0);
+    document.getElementById('stmt-calc-closing').textContent = `${formatMoney(closingBal, cur)} ${closingBal > 0 ? 'Dr' : (closingBal < 0 ? 'Cr' : '')}`.trim();
 
+    state.statementCustomerId = customerId;
+    state.statementFrom = from; state.statementTo = to;
+    document.getElementById('stmt-period').textContent = from || to ? `${from ? formatDate(from) : 'Start'} to ${to ? formatDate(to) : 'Latest'}` : 'All Records';
+    const fromEl = document.getElementById('statement-from');
+    if (fromEl) fromEl.value = from;
+    const toEl = document.getElementById('statement-to');
+    if (toEl) toEl.value = to;
     openModal('modal-statement');
   } catch (err) {
-    showToast('Failed to load statement: ' + err.message, 'error');
+    if (request === state.statementRequest) showToast('Failed to load statement: ' + err.message, 'error');
+  } finally {
+    if (request === state.statementRequest) state.statementLoading = false;
   }
 }
 
@@ -913,7 +957,7 @@ async function showReceiptForTransaction(trxId) {
 
     const titleEl = document.getElementById('receipt-modal-title');
     if (titleEl) {
-      titleEl.textContent = rec.transaction_type === 'Debit' ? 'Payment Voucher (Debit)' : 'Payment Receipt (Credit)';
+      titleEl.textContent = rec.transaction_type === 'Debit' ? 'Payment Voucher — Debit (Banam)' : 'Payment Receipt — Credit (Jama)';
     }
 
     const settings = await khataApi.getSettings();
@@ -926,10 +970,10 @@ async function showReceiptForTransaction(trxId) {
     document.getElementById('rec-cust-name').textContent = `${rec.customer_name} (Account ${rec.account_code})`;
     document.getElementById('rec-method').textContent = rec.payment_method;
     document.getElementById('rec-trx-id').textContent = rec.transaction_code;
-    document.getElementById('rec-details').textContent = rec.description || (rec.transaction_type === 'Debit' ? 'Cash Given' : 'Cash Received');
+    document.getElementById('rec-details').textContent = rec.description || (rec.transaction_type === 'Debit' ? 'Debit (Banam)' : 'Credit (Jama)');
 
     const amountLabel = document.getElementById('rec-amount-label');
-    if (amountLabel) amountLabel.textContent = rec.transaction_type === 'Debit' ? 'Debit Amount' : 'Credit Amount';
+    if (amountLabel) amountLabel.textContent = rec.transaction_type === 'Debit' ? 'Debit (Banam) Amount' : 'Credit (Jama) Amount';
 
     const cur = rec.currency;
     document.getElementById('rec-prev-bal').textContent = formatMoney(rec.previous_balance_cents, cur);
@@ -1003,9 +1047,13 @@ async function handleAddCustomerNote() {
 let currentReportType = 'balance';
 
 async function loadReports() {
+  const request = (state.reportRequest || 0) + 1;
+  state.reportRequest = request;
+  const reportType = currentReportType;
   try {
   const currencyFilter = document.getElementById('report-currency-filter').value;
   const settings = await khataApi.getSettings();
+  if (request !== state.reportRequest) return;
 
   document.getElementById('report-biz-name').textContent = settings.business_name || 'Simple Khata Store';
   addPrintLogo('report-paper-container', settings.logo_base64);
@@ -1020,58 +1068,81 @@ async function loadReports() {
     daily: 'DAILY TRANSACTIONS REPORT',
     custom: 'CUSTOM DATE RANGE REPORT'
   };
-  document.getElementById('report-sheet-title').textContent = titles[currentReportType] || 'FINANCIAL REPORT';
+  document.getElementById('report-sheet-title').textContent = titles[reportType] || 'FINANCIAL REPORT';
 
     let reportData = null;
-    const dated = currentReportType === 'daily' || currentReportType === 'custom';
+    const dated = reportType === 'daily' || reportType === 'custom';
+    const outstanding = reportType === 'receivable' || reportType === 'payable';
+    const paper = document.getElementById('report-paper-container');
+    paper.classList.toggle('outstanding-report', outstanding);
+    paper.dataset.reportType = reportType;
+    document.getElementById('report-outstanding-summary').hidden = true;
     document.getElementById('report-filter-bar').style.display = dated ? 'flex' : 'none';
-    document.getElementById('report-to-label').style.display = currentReportType === 'custom' ? '' : 'none';
-    document.getElementById('report-date-to-input').style.display = currentReportType === 'custom' ? '' : 'none';
-    document.getElementById('report-totals-footer').style.display = dated ? 'none' : 'grid';
+    document.getElementById('report-to-label').style.display = reportType === 'custom' ? '' : 'none';
+    document.getElementById('report-date-to-input').style.display = reportType === 'custom' ? '' : 'none';
+    document.getElementById('report-totals-footer').style.display = dated || outstanding ? 'none' : 'grid';
     if (dated) {
       const dateInput = document.getElementById('report-date-input');
       if (!dateInput.value) dateInput.value = localToday();
       const from = dateInput.value;
-      const to = currentReportType === 'daily' ? from : document.getElementById('report-date-to-input').value;
+      const to = reportType === 'daily' ? from : document.getElementById('report-date-to-input').value;
       if (!to || to < from) {
         document.getElementById('report-sheet-body').innerHTML = '';
         showToast('Select a valid start and end date.', 'error');
         return;
       }
       const rows = await khataApi.getAllTransactions({ currency: currencyFilter, date_from: from, date_to: to });
-      document.getElementById('report-sheet-header-row').innerHTML = '<th>Date</th><th>Transaction</th><th>Customer</th><th>Currency</th><th>Details</th><th>Debit</th><th>Credit</th>';
+      if (request !== state.reportRequest) return;
+      document.getElementById('report-sheet-header-row').innerHTML = '<th>Date</th><th>Transaction</th><th>Customer</th><th>Currency</th><th>Details</th><th>Debit (Banam)</th><th>Credit (Jama)</th>';
       document.getElementById('report-sheet-body').innerHTML = rows.map(t => `<tr><td>${formatDate(t.transaction_date)}</td><td>${escapeHtml(t.transaction_code)}</td><td>${escapeHtml(t.customer_name)}</td><td>${escapeHtml(t.currency)}</td><td>${escapeHtml(t.description)}</td><td>${t.transaction_type === 'Debit' ? formatMoney(t.amount, t.currency) : '—'}</td><td>${t.transaction_type === 'Credit' ? formatMoney(t.amount, t.currency) : '—'}</td></tr>`).join('') || '<tr><td colspan="7">No transactions for this period.</td></tr>';
       return;
     }
-    document.getElementById('report-sheet-header-row').innerHTML = '<th>Account Code</th><th>Customer Name</th><th>Currency</th><th>Total Debit</th><th>Total Credit</th><th>Current Balance</th><th>Status</th>';
-    if (currentReportType === 'balance') {
+    document.getElementById('report-sheet-header-row').innerHTML = outstanding
+      ? '<th>Account No.</th><th>Name</th><th>Contact</th><th class="text-right">Balance</th>'
+      : '<th>Account Code</th><th>Customer Name</th><th>Currency</th><th class="text-right">Total Debit (Banam)</th><th class="text-right">Total Credit (Jama)</th><th class="text-right">Current Balance</th><th>Status</th>';
+    if (reportType === 'balance') {
       reportData = await khataApi.getCustomerBalanceReport(currencyFilter);
-    } else if (currentReportType === 'receivable') {
+    } else if (reportType === 'receivable') {
       reportData = await khataApi.getReceivableReport(currencyFilter);
-    } else if (currentReportType === 'payable') {
+    } else if (reportType === 'payable') {
       reportData = await khataApi.getPayableReport(currencyFilter);
     }
 
-    renderReportTable(reportData);
+    if (request !== state.reportRequest) return;
+    renderReportTable(reportData, reportType, currencyFilter);
   } catch (err) {
     showToast('Failed to generate report: ' + err.message, 'error');
   }
 }
 
-function renderReportTable(reportData) {
+function renderReportTable(reportData, reportType = currentReportType, currencyFilter = 'ALL') {
+  const outstanding = reportType === 'receivable' || reportType === 'payable';
+  const rows = outstanding ? [...reportData.rows].sort((a,b) => a.currency.localeCompare(b.currency) || Math.abs(b.current_balance) - Math.abs(a.current_balance) || String(a.account_code).localeCompare(String(b.account_code), undefined, {numeric:true})) : reportData.rows;
+  const summary = document.getElementById('report-outstanding-summary');
+  summary.hidden = !outstanding;
+  if (outstanding) {
+    const label = reportType === 'receivable' ? 'Receivable' : 'Payable';
+    const currencies = currencyFilter === 'AED' || currencyFilter === 'PKR' ? [currencyFilter] : ['AED','PKR'];
+    summary.innerHTML = `<div class="report-summary-count"><small>Accounts with outstanding balance</small><strong>${rows.length}</strong><span>Largest balances first within each currency</span></div>${currencies.map(currency => `<div class="report-summary-amount"><small>Total ${label} · ${currency}</small><strong>${formatMoney((currency === 'AED' ? reportData.aedTotals : reportData.pkrTotals)[reportType], currency)}</strong><span>${rows.filter(r=>r.currency===currency).length} accounts</span></div>`).join('')}`;
+  }
   const tbody = document.getElementById('report-sheet-body');
-  if (!reportData.rows || reportData.rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="padding:24px; color:#94a3b8;">No customer records match this report.</td></tr>`;
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="${outstanding ? 4 : 7}" class="text-center" style="padding:24px; color:#94a3b8;">${outstanding ? `No ${reportType} balances for the selected currency.` : 'No customer records match this report.'}</td></tr>`;
   } else {
-    tbody.innerHTML = reportData.rows.map(r => `
+    tbody.innerHTML = rows.map(r => `
       <tr>
-        <td><span class="account-code-pill">${r.account_code}</span></td>
+        <td><span class="account-code-pill">${escapeHtml(r.account_code)}</span></td>
         <td><strong>${escapeHtml(r.name)}</strong></td>
-        <td><span class="badge badge-${r.currency.toLowerCase()}">${r.currency}</span></td>
-        <td class="text-right tabular-nums">${formatMoney(r.total_debit, r.currency)}</td>
-        <td class="text-right tabular-nums">${formatMoney(r.total_credit, r.currency)}</td>
-        <td class="text-right tabular-nums" style="font-weight:700;">${formatMoney(r.current_balance, r.currency)}</td>
-        <td><span class="badge ${r.status === 'Receivable' ? 'badge-receivable' : (r.status === 'Payable' ? 'badge-payable' : 'badge-zero')}">${balanceLabel(r.status)}</span></td>
+        ${outstanding ? `
+          <td class="report-contact"><div class="report-contact-mobile">${escapeHtml(r.mobile || '—')}</div><div class="report-contact-address">${escapeHtml(r.address || '—')}</div></td>
+          <td class="text-right tabular-nums report-outstanding-amount" style="font-weight:700;">${formatMoney(r.current_balance, r.currency)}</td>
+        ` : `
+          <td><span class="badge badge-${r.currency.toLowerCase()}">${escapeHtml(r.currency)}</span></td>
+          <td class="text-right tabular-nums">${formatMoney(r.total_debit, r.currency)}</td>
+          <td class="text-right tabular-nums">${formatMoney(r.total_credit, r.currency)}</td>
+          <td class="text-right tabular-nums" style="font-weight:700;">${formatMoney(r.current_balance, r.currency)}</td>
+          <td><span class="badge ${r.status === 'Receivable' ? 'badge-receivable' : (r.status === 'Payable' ? 'badge-payable' : 'badge-zero')}">${balanceLabel(r.status)}</span></td>
+        `}
       </tr>
     `).join('');
   }
@@ -1113,12 +1184,30 @@ async function loadBackups() {
         <td>${b.formatted_size}</td>
         <td class="text-center">
           <button class="btn btn-outline btn-sm" onclick="handleRestoreBackup('${escapeHtml(escapeJsString(b.filepath))}')">Restore</button>
+          <button class="btn btn-danger btn-sm" data-delete-backup="${escapeHtml(b.filename)}">Delete</button>
         </td>
       </tr>
     `).join('');
+    tbody.querySelectorAll('[data-delete-backup]').forEach(button => {
+      button.addEventListener('click', () => handleDeleteBackup(button.dataset.deleteBackup));
+    });
   } catch (err) {
     showToast('Failed to load backup list: ' + err.message, 'error');
   }
+}
+
+function handleDeleteBackup(filename) {
+  if (state.currentUser?.role !== 'Admin') return showToast('Only an Administrator can delete backups.', 'error');
+  openConfirmDialog('Delete Local Backup',
+    `Permanently delete ${filename}? Current khata records, Google Drive backups and copies in your selected backup folder will remain unchanged.`,
+    async () => {
+      try {
+        await khataApi.deleteBackup(filename);
+        showToast('Local backup deleted.');
+        await loadBackups();
+        document.getElementById('refresh-health')?.click();
+      } catch (err) { showToast('Could not delete backup: ' + err.message, 'error'); }
+    });
 }
 
 async function handleCreateBackupNow() {
@@ -1665,6 +1754,7 @@ function attachAdditionalActions() {
   document.getElementById('btn-export-report-csv').addEventListener('click', () => exportTableCsv('#report-sheet-table', 'report.csv'));
   document.getElementById('btn-export-statement-csv').addEventListener('click', () => exportTableCsv('#statement-paper table', 'statement.csv'));
   document.getElementById('btn-generate-custom-report').addEventListener('click', loadReports);
+
   document.getElementById('btn-open-new-user-modal').addEventListener('click', () => {
     document.getElementById('form-new-user').reset();
     openModal('modal-new-user');
@@ -1741,6 +1831,7 @@ async function openEditTransactionModal(id) {
     state.transactionCustomerId = customer.id;
     document.getElementById('transaction-modal-title').textContent = `Edit ${transaction.transaction_code}`;
     document.getElementById('btn-save-transaction').textContent = 'Update Transaction (Ctrl+S)';
+    document.getElementById('btn-save-next').hidden = true;
     const select = document.getElementById('trx-customer-select');
     select.innerHTML = `<option value="${customer.id}" data-currency="${customer.currency}" data-balance="${customer.balance_cents}" data-status="${customer.status}">${escapeHtml(customer.account_code)} — ${escapeHtml(customer.name)}</option>`;
     select.disabled = true;
@@ -1749,11 +1840,16 @@ async function openEditTransactionModal(id) {
     document.getElementById('trx-debit').value = isDebit ? (transaction.amount / 100).toFixed(2) : '';
     document.getElementById('trx-credit').value = !isDebit ? (transaction.amount / 100).toFixed(2) : '';
     document.getElementById('trx-date').value = transaction.transaction_date || '';
+    const dueDateEditEl = document.getElementById('trx-due-date');
+    if (dueDateEditEl) dueDateEditEl.value = transaction.due_date || '';
     document.getElementById('trx-details').value = transaction.description || '';
-    document.getElementById('trx-due-date').value = transaction.due_date || '';
-    document.getElementById('trx-correction-reason').value = '';
-    document.getElementById('trx-correction-reason').required = true;
-    document.getElementById('trx-correction-wrap').hidden = false;
+    const corrReasonEditEl = document.getElementById('trx-correction-reason');
+    if (corrReasonEditEl) {
+      corrReasonEditEl.value = '';
+      corrReasonEditEl.required = true;
+    }
+    const corrWrapEditEl = document.getElementById('trx-correction-wrap');
+    if (corrWrapEditEl) corrWrapEditEl.hidden = false;
     handleTrxCustomerSelectChange();
     openModal('modal-new-transaction');
   } catch (err) { showToast('Could not open transaction: ' + err.message, 'error'); }
@@ -1772,6 +1868,7 @@ async function loadTransactionCustomers() {
 async function refreshBackupStatus() {
   try {
     const status = await khataApi.getBackupStatus();
+    if (typeof dashboardBackupStatus === 'function') dashboardBackupStatus();
     const displayTime = value => value ? new Date(value).toLocaleString() : 'No successful backup yet';
     document.getElementById('backup-last-success').textContent = displayTime(status.lastSuccessAt);
     document.getElementById('backup-next-due').textContent = status.frequency === 'Manual Only' ? 'Manual backups only' : status.nextBackupAt ? displayTime(status.nextBackupAt) : 'Due now';
@@ -1863,7 +1960,7 @@ async function loadDriveStatus() {
     document.getElementById('drive-connection-badge').className = 'badge ' + (connected ? 'badge-receivable' : 'badge-zero');
     document.getElementById('drive-last-success').textContent = status?.lastSuccessAt ? new Date(status.lastSuccessAt).toLocaleString() : 'Not backed up yet';
     document.getElementById('drive-pending').textContent = status?.pending ?? 0;
-    message.textContent = !supported ? 'Open the Windows desktop app to connect Google Drive.' : !admin ? 'An administrator can manage this connection.' : driveUiBusy || status.busy ? 'Working… Complete Google sign-in in your browser.' : status.lastError || (connected ? status.pending ? 'Waiting to upload; retries while the app is open.' : 'Ready for backup' : status.configured ? 'Choose your Google account to start backing up' : 'Google sign-in setup is missing. Open Advanced setup.');
+    message.textContent = !supported ? 'Open the Windows desktop app to connect Google Drive.' : !admin ? 'An administrator can manage this connection.' : driveUiBusy || status.busy ? 'Working… Complete Google sign-in in your browser.' : status.lastError || (connected ? status.pending ? 'Waiting to upload; retries while the app is open.' : 'Ready for backup' : status.configured ? 'Choose your Google account to start backing up' : 'Google sign-in is unavailable. Please contact app support.');
     const blocked = !supported || !admin || driveUiBusy || Boolean(status?.busy);
     document.getElementById('btn-drive-connect').disabled = blocked || connected || !status?.configured;
     document.getElementById('btn-drive-connect').hidden = connected;
@@ -1871,11 +1968,8 @@ async function loadDriveStatus() {
     switchButton.hidden = !connected;
     switchButton.disabled = blocked || !connected;
     switchButton.textContent = status?.needsReconnect ? 'Reconnect Google Account' : 'Change Google Account';
-    document.getElementById('btn-drive-import').disabled = blocked || connected;
     for (const id of ['btn-drive-backup', 'btn-drive-list']) document.getElementById(id).disabled = blocked || !connected || Boolean(status?.needsReconnect);
     document.getElementById('btn-drive-disconnect').disabled = blocked || !connected;
-    document.getElementById('btn-drive-setup').disabled = !supported || !admin;
-    if (supported && !status.configured) document.getElementById('drive-setup-guide').open = true;
   } catch (err) { message.textContent = 'Could not check Google Drive: ' + err.message; }
 }
 
@@ -1889,13 +1983,8 @@ async function runDriveAction(action) {
 }
 
 function bindDriveBackupControls() {
-  document.getElementById('btn-drive-setup').addEventListener('click', () => runDriveAction(() => khataApi.openDriveSetup()));
-  document.getElementById('btn-drive-import').addEventListener('click', () => runDriveAction(async () => {
-    if (await khataApi.importDriveCredentials(state.currentUser)) showToast('Google setup imported. You can now connect your account.');
-  }));
   document.getElementById('btn-drive-connect').addEventListener('click', () => runDriveAction(async () => {
     await khataApi.connectDrive(state.currentUser);
-    document.getElementById('drive-setup-guide').open = false;
     showToast('Google Drive connected. Click Back Up to Drive Now for your first upload.');
   }));
   document.getElementById('btn-drive-switch').addEventListener('click', () => openConfirmDialog('Change Google Account', 'Choose a Google account in your browser. Pending backups for the previous account will be kept locally and will not be uploaded to the new account. Cancelling sign-in keeps your current connection.', () => runDriveAction(async () => {

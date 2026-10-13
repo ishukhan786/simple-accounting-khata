@@ -40,9 +40,11 @@ const Backup = require('./db/backup');
     assert.equal(db.getReceiptByTransactionId(credit.id).amount, 4000);
     assert.equal(db.getReceiptByTransactionId(credit.id).remaining_balance_cents, 11000);
   });
-  check('Changing credit to debit removes obsolete receipt', () => {
+  check('Changing credit to debit keeps the voucher receipt', () => {
     db.updateTransaction(credit.id, { correction_reason: 'Regression correction', amount: 4000, transaction_type: 'Debit' }, admin);
-    assert.equal(db.getReceiptByTransactionId(credit.id), null);
+    const voucher = db.getReceiptByTransactionId(credit.id);
+    assert.equal(voucher.transaction_type, 'Debit');
+    assert.equal(voucher.amount, 4000);
   });
   check('Changing debit to credit creates receipt', () => {
     db.updateTransaction(credit.id, { correction_reason: 'Regression correction', amount: 4000, transaction_type: 'Credit' }, admin);

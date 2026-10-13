@@ -55,11 +55,11 @@ async function fixture(t) {
 
 test('offline snapshots survive restart and upload once after a lost response', async t => {
   const f = await fixture(t); f.setOffline(true);
-  await assert.rejects(f.drive.backupNow(admin), /offline/);
+  await assert.rejects(f.drive.backupNow(admin), error => /Could not reach Google Drive/.test(error.message) && /offline/.test(error.cause?.message));
   assert.equal(f.drive.status().pending, 1); assert.equal(f.drive.status().lastSuccessAt, null);
   const restarted = new GoogleDriveBackup(f.args); assert.equal(restarted.status().pending, 1);
   f.setOffline(false); f.loseResponse();
-  await assert.rejects(restarted.exclusive(() => restarted.flush()), /response lost/);
+  await assert.rejects(restarted.exclusive(() => restarted.flush()), error => /Could not reach Google Drive/.test(error.message) && /response lost/.test(error.cause?.message));
   assert.equal(f.remote.length, 1); assert.equal(restarted.status().pending, 1);
   await restarted.exclusive(() => restarted.flush());
   assert.equal(f.remote.length, 1); assert.equal(restarted.status().pending, 0); assert(restarted.status().lastSuccessAt);

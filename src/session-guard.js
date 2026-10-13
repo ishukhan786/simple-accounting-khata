@@ -1,17 +1,18 @@
 // All identities are resolved here, never from renderer/request user objects.
 const actorPositions = {
-  setPeriodLock: 2, commitImport: 1, installAppUpdate: 0,
-  changePassword: 2, createCustomer: 1, updateCustomer: 2, archiveCustomer: 1,
+  restoreDeletedTransaction: 2, setPeriodLock: 2, commitImport: 1, installAppUpdate: 0,
+  deleteBackup: 1, changePassword: 2, createCustomer: 1, updateCustomer: 2, archiveCustomer: 1,
   deleteCustomer: 1, createTransaction: 1, updateTransaction: 2, deleteTransaction: 1,
   addCustomerNote: 2, updateSettings: 1, createBackup: 0, restoreBackup: 1,
   createUser: 4, deleteUser: 1, importDriveCredentials: 0, connectDrive: 0,
   disconnectDrive: 0, backupToDrive: 0, listDriveBackups: 0, restoreDriveBackup: 1, switchDriveAccount: 0
 };
 const adminOnly = new Set([
+  'getDeletedTransactions', 'restoreDeletedTransaction',
   'setPeriodLock', 'getBackupHealth', 'previewImport', 'commitImport', 'downloadAppUpdate', 'installAppUpdate',
   'updateCustomer', 'archiveCustomer', 'deleteCustomer', 'updateTransaction',
   'deleteTransaction', 'updateSettings', 'getUsers', 'createUser', 'deleteUser',
-  'getAuditLogs', 'getBackups', 'createBackup', 'restoreBackup', 'pickRestoreFile',
+  'getAuditLogs', 'getBackups', 'createBackup', 'deleteBackup', 'restoreBackup', 'pickRestoreFile',
   'pickBackupDirectory', 'getDriveStatus', 'importDriveCredentials', 'openDriveSetup',
   'connectDrive', 'disconnectDrive', 'backupToDrive', 'listDriveBackups', 'restoreDriveBackup', 'switchDriveAccount'
 ]);

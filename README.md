@@ -136,7 +136,6 @@ The output executable will be placed in the `dist/` directory.
 - **Settings → Download & install updates** shows progress, requires explicit
   installation, and stops if the pre-install local backup fails. Installed Windows
   copies support this; portable/development builds use the releases page.
-
 ### Publishing Windows updates
 
 Publish a stable GitHub release tagged `v1.1.0` (then increment the version for

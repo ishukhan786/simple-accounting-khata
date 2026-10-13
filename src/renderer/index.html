@@ -132,7 +132,7 @@
             </div>
           </div>
 
-          <div class="metric-card">
+          <div class="metric-card" onclick="navigateTo('transactions')" style="cursor:pointer;" title="Transactions kholein">
             <div class="metric-icon-wrap" style="background:#eff6ff; color:#2563eb;">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
             </div>
@@ -164,7 +164,7 @@
                 <div class="amount" id="dash-aed-payable">AED 0.00</div>
               </div>
               <div class="currency-card-subtotals">
-                <span>Today's Received: <strong id="dash-aed-received">AED 0.00</strong></span>
+                <span>Today's Credit (Jama): <strong id="dash-aed-received">AED 0.00</strong></span>
                 <span>Today's Paid: <strong id="dash-aed-paid">AED 0.00</strong></span>
               </div>
             </div>
@@ -189,7 +189,7 @@
                 <div class="amount" id="dash-pkr-payable">PKR 0.00</div>
               </div>
               <div class="currency-card-subtotals">
-                <span>Today's Received: <strong id="dash-pkr-received">PKR 0.00</strong></span>
+                <span>Today's Credit (Jama): <strong id="dash-pkr-received">PKR 0.00</strong></span>
                 <span>Today's Paid: <strong id="dash-pkr-paid">PKR 0.00</strong></span>
               </div>
             </div>
@@ -314,8 +314,8 @@
                   <th>Date</th>
                   <th>Transaction ID</th>
                   <th>Details</th>
-                  <th class="text-right">Debit (Given)</th>
-                  <th class="text-right">Credit (Received)</th>
+                  <th class="text-right">Debit (Banam)</th>
+                  <th class="text-right">Credit (Jama)</th>
                   <th class="text-right">Running Balance</th>
                   <th class="text-center">Actions</th>
                 </tr>
@@ -332,8 +332,8 @@
               <span>Opening Balance: <strong id="khata-opening-val">0.00</strong></span>
             </div>
             <div style="display:flex; gap:24px; font-size:0.9rem;">
-              <span>Total Debit: <strong id="khata-total-debit" style="color:#b91c1c;">0.00</strong></span>
-              <span>Total Credit: <strong id="khata-total-credit" style="color:#15803d;">0.00</strong></span>
+              <span>Total Debit (Banam): <strong id="khata-total-debit" style="color:#b91c1c;">0.00</strong></span>
+              <span>Total Credit (Jama): <strong id="khata-total-credit" style="color:#15803d;">0.00</strong></span>
               <span>Closing Balance: <strong id="khata-closing-val">0.00</strong></span>
             </div>
           </div>
@@ -341,8 +341,8 @@
       </section>
 
       <!-- 4. ALL TRANSACTIONS VIEW -->
-      <section id="view-transactions" class="view-section fixed-list-view">
-        <div class="card fixed-list-card">
+      <section id="view-transactions" class="view-section">
+        <div class="card">
           <div class="card-header" style="flex-wrap: wrap; gap: 12px;">
             <h3 class="card-title">All Transactions</h3>
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
@@ -353,8 +353,8 @@
               </select>
               <select id="filter-trx-type" class="form-control" style="width:130px;">
                 <option value="">Type: All</option>
-                <option value="Debit">Debit (Given)</option>
-                <option value="Credit">Credit (Received)</option>
+                <option value="Debit">Debit (Banam)</option>
+                <option value="Credit">Credit (Jama)</option>
               </select>
               <input type="date" id="filter-trx-date-from" class="form-control" style="width:130px;" title="From Date">
               <input type="date" id="filter-trx-date-to" class="form-control" style="width:130px;" title="To Date">
@@ -369,9 +369,9 @@
               <label>Maximum amount<input id="filter-trx-max" type="number" min="0" step="0.01" class="form-control" placeholder="No limit"></label>
             </div>
             <p id="transaction-filter-summary" class="form-hint" style="padding:0 16px;" aria-live="polite">Search by customer, description, transaction ID or reference using the search box above. Amount filters apply in each account's currency.</p>
-            <div class="table-responsive fixed-table-panel" id="transactions-table-panel">
+            <div class="table-responsive" id="transactions-table-panel">
 <table class="data-table" id="table-all-transactions">
-              <colgroup><col style="width:15%"><col style="width:17%"><col style="width:24%"><col style="width:12%"><col style="width:12%"><col style="width:20%"></colgroup><thead><tr><th>Date / ID</th><th>Customer</th><th>Details</th><th class="text-right">Debit</th><th class="text-right">Credit</th><th class="text-center">Actions</th></tr></thead>
+              <colgroup><col style="width:15%"><col style="width:17%"><col style="width:24%"><col style="width:12%"><col style="width:12%"><col style="width:20%"></colgroup><thead><tr><th>Date / ID</th><th>Customer</th><th>Details</th><th class="text-right">Debit (Banam)</th><th class="text-right">Credit (Jama)</th><th class="text-center">Actions</th></tr></thead>
               <tbody id="all-transactions-body">
                 <!-- Rendered dynamically -->
               </tbody>
@@ -380,9 +380,13 @@
 
           <div class="list-footer" aria-label="transactions status">
             <span id="transactions-page-info" aria-live="polite">0 transactions</span>
+            <div class="list-actions"><button id="transactions-prev" class="btn btn-outline btn-sm" disabled onclick="loadTransactions(state.transactionsPage-1)">Previous</button><button id="transactions-next" class="btn btn-outline btn-sm" disabled onclick="loadTransactions(state.transactionsPage+1)">Next</button></div>
           </div>
         </div>
       </section>
+
+      <!-- 4b. ROZNAMCHA (DAILY DAYBOOK) VIEW -->
+      
 
       <!-- 5. REPORTS VIEW -->
       <section id="view-reports" class="view-section">
@@ -430,6 +434,7 @@
               </div>
             </div>
 
+            <div id="report-outstanding-summary" class="report-outstanding-summary" hidden></div>
             <div class="table-responsive" style="border:none;">
               <table class="statement-table" id="report-sheet-table">
                 <thead>
@@ -437,8 +442,8 @@
                     <th>Account Code</th>
                     <th>Customer Name</th>
                     <th>Currency</th>
-                    <th class="text-right">Total Debit</th>
-                    <th class="text-right">Total Credit</th>
+                    <th class="text-right">Total Debit (Banam)</th>
+                    <th class="text-right">Total Credit (Jama)</th>
                     <th class="text-right">Current Balance</th>
                     <th>Status</th>
                   </tr>
@@ -488,19 +493,6 @@
             <button type="button" class="btn btn-outline" id="btn-drive-list">View Drive Backups</button>
             <button type="button" class="btn btn-outline" id="btn-drive-disconnect">Disconnect</button>
           </div>
-          <details id="drive-setup-guide" class="drive-setup-guide">
-            <summary>Advanced setup / use a different OAuth project</summary>
-            <p>The standard app is ready for Google sign-in. These settings are only needed to use your own Google Cloud project or recover backups created with a different project.</p>
-            <ol>
-              <li>Open Google Cloud and create or select a project for Simple Khata. Enable <strong>Google Drive API</strong>.</li>
-              <li>Open <strong>Google Auth Platform</strong>. Complete Branding with the app name and your email. Choose <strong>External</strong> audience and publish <strong>In production</strong> to allow Google accounts beyond a test-user list.</li>
-              <li>Under Data Access, add <strong>https://www.googleapis.com/auth/drive.appdata</strong>. This permission is limited to this app's backup storage.</li>
-              <li>Under Clients, create an OAuth client with application type <strong>Desktop app</strong>, then download its JSON credentials file.</li>
-              <li>Import that file below, click <strong>Connect Google Drive</strong>, and sign in through your browser. Then click <strong>Back Up to Drive Now</strong> for your first upload.</li>
-            </ol>
-            <p>External apps in Testing may require reconnection after seven days. For ongoing personal use, review Google's publishing requirements and switch to Production when ready. Keep the same Google Cloud project and client when setting up a replacement computer so it can access your backups.</p>
-            <div class="drive-actions"><button type="button" class="btn btn-outline" id="btn-drive-setup">Open Google Cloud Setup</button><button type="button" class="btn btn-outline" id="btn-drive-import">Import Credentials JSON</button></div>
-          </details>
           <p class="drive-footnote">Backups are stored in Simple Khata's private app storage in Drive and listed here, rather than in My Drive. Older cloud copies are retained. Disconnecting keeps uploaded backups. Restore replaces current records after creating a local safety copy.</p>
           <div id="drive-backups-list" class="drive-backups-list" hidden></div>
         </div>
@@ -659,7 +651,7 @@
               <div>
                 <div style="display:flex; align-items:center; gap:8px;">
                   <h4 style="font-size:0.95rem; font-weight:700;">App Updates & Version</h4>
-                  <span id="settings-app-version-badge" class="badge badge-zero" style="font-size:0.75rem;">v1.1.0</span>
+                  <span id="settings-app-version-badge" class="badge badge-zero" style="font-size:0.75rem;">v1.7.3</span>
                 </div>
                 <p id="settings-update-status" style="font-size:0.82rem; color:#64748b; margin-top:3px;">Check for new releases and updates from GitHub.</p>
               </div>
@@ -924,14 +916,14 @@
         <!-- Amount and Date -->
         <div class="form-row">
           <div class="form-group">
-            <label for="trx-debit">Debit (Given)</label>
+            <label for="trx-debit">Debit (Banam)</label>
             <div class="amount-input-wrap">
               <span class="currency-locked-prefix" id="trx-debit-curr-prefix">AED</span>
               <input type="number" step="0.01" min="0" id="trx-debit" class="form-control" placeholder="0.00">
             </div>
           </div>
           <div class="form-group">
-            <label for="trx-credit">Credit (Received)</label>
+            <label for="trx-credit">Credit (Jama)</label>
             <div class="amount-input-wrap">
               <span class="currency-locked-prefix" id="trx-credit-curr-prefix">AED</span>
               <input type="number" step="0.01" min="0" id="trx-credit" class="form-control" placeholder="0.00">
@@ -945,9 +937,14 @@
             <input type="date" id="trx-date" class="form-control" required>
           </div>
           <div class="form-group">
-            <label for="trx-details">Details / Description <span class="req">*</span></label>
-            <input type="text" id="trx-details" class="form-control" placeholder="e.g. Invoice #102, Cash payment" required>
+            <label for="trx-due-date">Due Date <span class="opt">(Optional)</span></label>
+            <input type="date" id="trx-due-date" class="form-control">
           </div>
+        </div>
+
+        <div class="form-group">
+          <label for="trx-details">Details / Description <span class="req">*</span></label>
+          <textarea id="trx-details" class="form-control" rows="3" placeholder="e.g. Invoice #102, Cash payment" required></textarea>
         </div>
 
       </div>
@@ -987,11 +984,11 @@
         </div>
 
         <div class="statement-meta-box">
-          <div>
-            <div><strong>Account Code:</strong> <span id="stmt-cust-code">01</span></div>
-            <div><strong>Customer Name:</strong> <span id="stmt-cust-name">Ali Khan</span></div>
-            <div id="stmt-cust-mobile-wrap"><strong>Mobile:</strong> <span id="stmt-cust-mobile">—</span></div>
-            <div id="stmt-cust-addr-wrap"><strong>Address:</strong> <span id="stmt-cust-addr">—</span></div>
+          <div class="statement-customer-details">
+            <div><strong>Account Code</strong><span>:</span><span id="stmt-cust-code">01</span></div>
+            <div><strong>Customer Name</strong><span>:</span><span id="stmt-cust-name">Ali Khan</span></div>
+            <div id="stmt-cust-mobile-wrap"><strong>Mobile</strong><span>:</span><span id="stmt-cust-mobile">—</span></div>
+            <div id="stmt-cust-addr-wrap"><strong>Address</strong><span>:</span><span id="stmt-cust-addr">—</span></div>
           </div>
           <div style="text-align:right;">
             <div><strong>Currency:</strong> <span id="stmt-currency" style="font-weight:700;">AED</span></div>
@@ -1004,12 +1001,12 @@
             <div class="stmt-card-title">Opening Balance</div>
             <div class="stmt-card-value" id="stmt-calc-opening">0.00</div>
           </div>
-          <div class="stmt-card">
-            <div class="stmt-card-title">Total Debit</div>
+          <div class="stmt-card stmt-debit">
+            <div class="stmt-card-title">Total Debit (Banam)</div>
             <div class="stmt-card-value" id="stmt-calc-debit" style="color: #dc2626;">0.00</div>
           </div>
-          <div class="stmt-card">
-            <div class="stmt-card-title">Total Credit</div>
+          <div class="stmt-card stmt-credit">
+            <div class="stmt-card-title">Total Credit (Jama)</div>
             <div class="stmt-card-value" id="stmt-calc-credit" style="color: #16a34a;">0.00</div>
           </div>
           <div class="stmt-card highlight-card">
@@ -1023,8 +1020,8 @@
             <tr>
               <th>Date</th>
               <th>Details</th>
-              <th class="text-right">Debit</th>
-              <th class="text-right">Credit</th>
+              <th class="text-right">Debit (Banam)</th>
+              <th class="text-right">Credit (Jama)</th>
               <th class="text-right">Balance</th>
             </tr>
           </thead>
@@ -1078,7 +1075,7 @@
             <span id="rec-prev-bal" class="tabular-nums">AED 500.00</span>
           </div>
           <div class="receipt-row highlight">
-            <span id="rec-amount-label">Amount Received:</span>
+            <span id="rec-amount-label">Credit (Jama) Amount:</span>
             <span id="rec-amount" class="tabular-nums">AED 300.00</span>
           </div>
           <div class="receipt-row">
@@ -1204,6 +1201,9 @@
 <!-- Scripts -->
 <script src="js/app.js"></script>
 <script src="js/improvements.js"></script>
+<script src="js/workflow-features.js"></script>
+<script src="js/professional.js"></script>
+<script src="js/ux.js"></script>
 </body>
 </html>
 

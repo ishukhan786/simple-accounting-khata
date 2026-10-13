@@ -14,7 +14,7 @@
     finally{btn.disabled=false;}
   });
   const form=document.querySelector('#form-new-transaction .modal-body');
-  form.insertAdjacentHTML('beforeend',`<div class="form-group"><label for="trx-due-date">Due date (optional)</label><input id="trx-due-date" type="date" class="form-control"><small>Receivables without a due date appear under Undated in aging.</small></div><div class="form-group" id="trx-correction-wrap" hidden><label for="trx-correction-reason">Reason for correction</label><input id="trx-correction-reason" class="form-control" maxlength="500"><button id="btn-trx-history" type="button" class="btn btn-outline btn-sm">View correction history</button><div id="trx-history" class="feature-result"></div></div>`);
+  form.insertAdjacentHTML('beforeend',`<div class="form-group" id="trx-correction-wrap" hidden><label for="trx-correction-reason">Reason for correction</label><input id="trx-correction-reason" class="form-control" maxlength="500"><button id="btn-trx-history" type="button" class="btn btn-outline btn-sm">View correction history</button><div id="trx-history" class="feature-result"></div></div>`);
   bind('btn-trx-history',async()=>{
     const rows=await api.getTransactionHistory(state.editingTransactionId);
     document.getElementById('trx-history').innerHTML=rows.length?rows.map(r=>{
@@ -33,7 +33,7 @@
   bind('refresh-health',health);
   setInterval(()=>{if(state.activeView==='backup')health().catch(()=>{});},15000);
   document.querySelector('[data-view="backup"]')?.addEventListener('click',()=>health().catch(()=>{}));
-  card('#view-reports','aging-report',`<h3>Payment aging</h3><p class="feature-hint">Receivables as of the selected date. Credits settle oldest debits first (FIFO). Due today is Not due; missing due dates and opening balances are Undated. AED and PKR remain separate.</p><div class="feature-toolbar"><label>As of<input id="aging-date" type="date" value="${today}" class="form-control"></label><label>Currency<select id="aging-currency" class="form-control"><option value="">Both currencies</option><option>AED</option><option>PKR</option></select></label><button id="generate-aging" class="btn btn-primary">Generate aging report</button><button id="export-aging" class="btn btn-outline">Export CSV</button></div><div id="aging-result" class="feature-result"></div>`,true);
+  card('#view-reports','aging-report',`<h3>Payment aging</h3><p class="feature-hint">Receivables as of the selected date. Credit (Jama) settles oldest Debit (Banam) entries first (FIFO). Due today is Not due; missing due dates and opening balances are Undated. AED and PKR remain separate.</p><div class="feature-toolbar"><label>As of<input id="aging-date" type="date" value="${today}" class="form-control"></label><label>Currency<select id="aging-currency" class="form-control"><option value="">Both currencies</option><option>AED</option><option>PKR</option></select></label><button id="generate-aging" class="btn btn-primary">Generate aging report</button><button id="export-aging" class="btn btn-outline">Export CSV</button></div><div id="aging-result" class="feature-result"></div>`,true);
   bind('generate-aging',async()=>{
     const rows=await api.getAgingReport(document.getElementById('aging-date').value,document.getElementById('aging-currency').value);
     const keys=['not_due','days_1_7','days_8_30','days_31_60','days_61_90','days_90_plus','undated','total'];
@@ -68,11 +68,28 @@
     }).join(''):'No transaction corrections recorded.';
   });
   for(const [id,close] of [['close-period',true],['reopen-period',false]])bind(id,async()=>{await api.setPeriodLock(close?document.getElementById('period-date').value:'',document.getElementById('period-reason').value);await period();showToast('Period status updated and recorded in audit history.');});
-  const statementTools=document.createElement('div');statementTools.id='statement-extra-tools';statementTools.style.display='none';statementTools.innerHTML='<input id="statement-from" type="date"><input id="statement-to" type="date"><button id="filter-statement"></button><button id="save-statement-pdf"></button><button id="share-statement"></button>';
-  document.body.appendChild(statementTools);
+  const statementTools=document.createElement('div');statementTools.id='statement-extra-tools';statementTools.className='feature-toolbar statement-share-toolbar';statementTools.innerHTML='<label>From<input id="statement-from" type="date" class="form-control"></label><label>To<input id="statement-to" type="date" class="form-control"></label><button type="button" class="btn btn-outline" id="filter-statement">Apply Dates</button><button type="button" class="btn btn-primary" id="save-statement-pdf">Save PDF</button><button type="button" class="btn btn-outline" id="save-statement-png">Save PNG</button><button type="button" class="btn btn-outline" id="share-statement">PDF + WhatsApp</button><small>Save the PDF, then attach it in the WhatsApp draft.</small>';
+  document.querySelector('#modal-statement > .modal-card').insertBefore(statementTools,document.querySelector('#modal-statement > .modal-card > .modal-body'));
   bind('filter-statement',()=>openCustomerStatementModal(state.statementCustomerId,document.getElementById('statement-from')?.value,document.getElementById('statement-to')?.value));
-  bind('save-statement-pdf',async()=>{const r=await api.exportStatementPdf(state.statementCustomerId,state.statementFrom,state.statementTo);if(r)showToast('Statement PDF saved: '+r.path);});
-  bind('share-statement',()=>api.openStatementWhatsApp(state.statementCustomerId));
+  const appliedStatement = () => {
+    if (state.statementLoading) throw Error('Wait for the statement preview to finish loading.');
+    const from = state.statementFrom || '', to = state.statementTo || '';
+    if (document.getElementById('statement-from').value !== from || document.getElementById('statement-to').value !== to) {
+      throw Error('Click Apply Dates first so the preview and export use the same period.');
+    }
+    return {id:state.statementCustomerId,from,to};
+  };
+  bind('save-statement-pdf',async()=>{const {id,from,to}=appliedStatement();const r=await api.exportStatementPdf(id,from,to);if(r)showToast('Statement PDF saved: '+r.path);});
+  bind('save-statement-png',async()=>{const {id,from,to}=appliedStatement();const r=await api.exportStatementPng(id,from,to);if(r)showToast(`${r.pageCount} PNG page(s) saved: ${r.path}`);});
+  bind('share-statement',async()=>{
+    const {id,from,to}=appliedStatement();
+    const c=await api.getCustomerById(id);
+    if(!/^[1-9]\d{7,14}$/.test(String(c.mobile||'').replace(/[\s()+-]/g,'')))throw Error('Set a customer mobile with country code first.');
+    const result=await api.exportStatementPdf(id,from,to);
+    if(!result)return;
+    await api.openStatementWhatsApp(id,from,to);
+    showToast('PDF saved. Attach it in the WhatsApp draft: '+result.path);
+  });
   card('#settings-tab-security-content','update-installer',`<h3>Download & install updates</h3><p class="feature-hint">Review release notes using Check for Updates above. Downloads require internet. Installation saves a local backup and closes the app. Portable copies use the releases page.</p><div class="feature-toolbar"><button id="download-installer" class="btn btn-primary">Download available update</button><button id="install-update" class="btn btn-outline" hidden>Back up & install update</button></div><progress id="update-download-progress" max="100" value="0"></progress><p id="update-download-message" aria-live="polite">No download running.</p>`);
   const updateProgress=p=>{document.getElementById('update-download-message').textContent=p.message;document.getElementById('update-download-progress').value=p.percent||0;document.getElementById('install-update').hidden=p.phase!=='ready';document.getElementById('download-installer').disabled=['checking','downloading','installing'].includes(p.phase);};
   api?.onUpdateProgress?.(updateProgress);

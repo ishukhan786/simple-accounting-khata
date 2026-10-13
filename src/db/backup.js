@@ -33,6 +33,24 @@ class BackupManager {
     return backups.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }
 
+  deleteBackup(filename, user) {
+    if (user?.role !== 'Admin') throw new Error('Only an Administrator can delete backups.');
+    if (typeof filename !== 'string' || !filename || /[\\/:]/.test(filename) || path.basename(filename) !== filename || !filename.endsWith('.db')) {
+      throw new Error('Invalid backup filename.');
+    }
+    const root = path.resolve(this.backupsDir);
+    if (fs.lstatSync(root).isSymbolicLink()) throw new Error('Invalid backup directory.');
+    const target = path.resolve(root, filename);
+    if (path.dirname(target) !== root || !fs.existsSync(target)) throw new Error('Backup file not found.');
+    const stats = fs.lstatSync(target);
+    if (!stats.isFile() || stats.isSymbolicLink()) throw new Error('Invalid backup file.');
+    const live = fs.statSync(this.dbManager.dbPath);
+    if (target.toLowerCase() === path.resolve(this.dbManager.dbPath).toLowerCase() || (stats.dev === live.dev && stats.ino === live.ino)) throw new Error('The active database cannot be deleted.');
+    fs.unlinkSync(target);
+    this.dbManager.logAudit('DELETE', 'BACKUP', 0, `Deleted local backup: ${filename}`, user);
+    return { success: true, filename };
+  }
+
   createBackup(customPath = null, user = { id: 1, name: 'Admin' }) {
     // Ensure current DB changes are flushed to disk
     this.dbManager.saveToDisk();
@@ -119,7 +137,8 @@ class BackupManager {
       const admins = candidate.exec("SELECT COUNT(*) FROM users WHERE role = 'Admin'");
       if (!admins[0]?.values[0]?.[0]) throw new Error('Backup must contain an administrator.');
       for (const table of Object.keys(required)) {
-        const columns = [...new Set([...required[table], ...this.dbManager.query(`PRAGMA table_info(${table})`).map(column => column.name)])];
+        const candidateColumns = candidate.exec(`PRAGMA table_info(${table})`)[0]?.values.map(row=>row[1]) || [];
+        const columns = [...new Set([...required[table], ...this.dbManager.query(`PRAGMA table_info(${table})`).map(column => column.name).filter(name=>name !== 'tag' || candidateColumns.includes('tag'))])];
         candidate.exec(`SELECT ${columns.join(',')} FROM ${table} LIMIT 0`);
       }
     } catch (err) {
@@ -139,6 +158,7 @@ class BackupManager {
     try {
       this.dbManager.db = candidate;
       this.dbManager.createTables();
+      this.dbManager.repairMissingReceipts();
       this.dbManager.saveToDisk();
 
       this.dbManager.logAudit(

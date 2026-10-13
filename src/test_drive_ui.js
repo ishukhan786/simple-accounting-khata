@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
       const click = async id => { document.getElementById(id).click(); await tick(); };
       navigateTo('backup'); await tick();
       check(!document.getElementById('btn-drive-connect').disabled, 'Bundled setup should allow immediate Google sign-in');
-      check(!document.getElementById('drive-setup-guide').open, 'Advanced setup should stay collapsed');
+      check(!document.getElementById('drive-setup-guide'), 'Advanced setup should be removed');
       await click('btn-drive-connect');
       check(document.getElementById('btn-drive-connect').disabled, 'Duplicate connection should be disabled');
       check(!document.getElementById('btn-drive-backup').disabled, 'Backup should enable after connection');

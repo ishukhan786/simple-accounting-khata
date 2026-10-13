@@ -100,9 +100,10 @@ function startAutoUpdateCheck() {
 
 function registerIpcHandlers() {
   const guard = new SessionGuard(db);
-  const trustedUrl = pathToFileURL(path.join(__dirname, 'src', 'renderer', 'index.html')).href;
+  const trustedUrl = pathToFileURL(path.join(__dirname, 'src', 'renderer', 'index.html')).href.toLowerCase();
   const handle = (name, callback) => ipcMain.handle(name, (event, ...args) => {
-    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== trustedUrl) throw new Error('Untrusted application request.');
+    const frameUrl = (event.senderFrame?.url || '').toLowerCase();
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame || frameUrl !== trustedUrl) throw new Error('Untrusted application request.');
     return guard.invoke(name, event.sender.id, args, trusted => callback(event, ...trusted));
   });
   handle('getSession', () => {});
@@ -126,6 +127,9 @@ function registerIpcHandlers() {
   handle('backupToDrive', async (e, user) => { requireAdmin(user); return driveBackup.backupNow(user); });
   handle('listDriveBackups', async (e, user) => { requireAdmin(user); return driveBackup.list(); });
   handle('restoreDriveBackup', async (e, id, user) => { requireAdmin(user); return driveBackup.restore(id, user); });
+  handle('getMonthlySummary', (e, month) => db.getMonthlySummary(month));
+  handle('getDeletedTransactions', () => db.getDeletedTransactions());
+  handle('restoreDeletedTransaction', (e, id, reason, user) => db.restoreDeletedTransaction(id, reason, user));
   handle('getTransactionById', (e, id) => db.getTransactionById(id));
   handle('getBackupStatus', () => backupManager.getStatus());
   handle('changePassword', (e, currentPassword, newPassword, user) => db.changePassword(currentPassword, newPassword, user));
@@ -148,6 +152,7 @@ function registerIpcHandlers() {
   handle('getSettings', async () => db.getSettings());
   handle('updateSettings', async (e, data, user) => db.updateSettings(data, user));
   handle('getBackups', async () => backupManager.getBackupList());
+  handle('deleteBackup', async (e, filename, user) => backupManager.deleteBackup(filename, user));
   handle('createBackup', async (e, user) => backupManager.createBackup(null, user));
   handle('restoreBackup', async (e, filepath, user) => backupManager.restoreBackup(filepath, user));
   handle('pickRestoreFile', async () => {
